@@ -1,0 +1,85 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto bg-white rounded-2xl shadow-sm p-8 md:p-10 border border-slate-100 mt-12">
+    <h2 class="text-2xl font-bold text-slate-800 mb-8 text-center">
+        {% if item %}
+            <span data-i18n="editTitle">Edit Knowledge</span>
+        {% else %}
+            <span data-i18n="formTitle">Share Your Knowledge</span>
+        {% endif %}
+    </h2>
+    
+    <form id="submission-form" class="space-y-6">
+        <input type="hidden" id="edit-item-id" value="{{ item.id if item else '' }}">
+
+        <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-2" data-i18n="formType">Type</label>
+            <div class="flex flex-col gap-2">
+                <select id="item-type" class="w-full border-slate-300 rounded-lg shadow-sm focus:border-blue-500 focus:ring-blue-500 p-3 border bg-slate-50">
+                    <option value="word" {% if item and item.item_type == 'word' %}selected{% endif %} data-i18n="optionWord">Word</option>
+                    <option value="concept" {% if item and item.item_type == 'concept' %}selected{% endif %} data-i18n="optionConcept">Concept</option>
+                    <option value="other" {% if item and item.item_type not in ['word', 'concept'] %}selected{% endif %} data-i18n="optionOther">Other (Custom)</option>
+                </select>
+                <input type="text" id="custom-type" value="{{ item.item_type if item and item.item_type not in ['word', 'concept'] else '' }}" class="{% if item and item.item_type not in ['word', 'concept'] %}block{% else %}hidden{% endif %} w-full border-slate-300 rounded-lg shadow-sm focus:border-blue-500 focus:ring-blue-500 p-3 border bg-slate-50 transition-all" data-i18n-placeholder="placeholderCustomType">
+            </div>
+        </div>
+
+        <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-2" data-i18n="formItemName">Item Name</label>
+            <input type="text" id="item-name" value="{{ item.item_name if item else '' }}" required class="w-full border-slate-300 rounded-lg shadow-sm focus:border-blue-500 focus:ring-blue-500 p-3 border bg-slate-50" data-i18n-placeholder="placeholderItem">
+        </div>
+        <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-2" data-i18n="formDefinition">Definition / Explanation</label>
+            <textarea id="item-definition" rows="3" required class="w-full border-slate-300 rounded-lg shadow-sm focus:border-blue-500 focus:ring-blue-500 p-3 border bg-slate-50 resize-none" data-i18n-placeholder="placeholderDef">{{ item.definition if item else '' }}</textarea>
+        </div>
+        <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-2" data-i18n="formExample">Example Sentence (Optional)</label>
+            <textarea id="item-example" rows="2" class="w-full border-slate-300 rounded-lg shadow-sm focus:border-blue-500 focus:ring-blue-500 p-3 border bg-slate-50 resize-none" data-i18n-placeholder="placeholderExample">{{ item.example if item else '' }}</textarea>
+        </div>
+        
+        <div id="url-container" class="space-y-3">
+            <label class="block mb-2">
+                <span class="text-sm font-semibold text-slate-700" data-i18n="formUrl">Reference Links (Optional)</span>
+                <span class="text-xs font-normal text-slate-400 ml-2" data-i18n="urlHelper">e.g., wikipedia.org</span>
+            </label>
+            
+            {% if item and item.urls %}
+                {% for url in item.urls %}
+                <div class="flex items-center gap-2 {% if loop.index0 > 0 %}mt-3{% endif %}">
+                    <input type="text" class="url-input w-full border-slate-300 rounded-lg shadow-sm focus:border-blue-500 focus:ring-blue-500 p-3 border bg-slate-50" value="{{ url }}">
+                    {% if loop.index0 == 0 %}
+                    <button type="button" id="add-url-btn" class="p-3 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition-colors">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                    </button>
+                    {% else %}
+                    <button type="button" class="remove-url-btn p-3 bg-red-50 text-red-500 rounded-lg hover:bg-red-100 transition-colors" onclick="this.parentElement.remove()">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"></path></svg>
+                    </button>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="flex items-center gap-2">
+                    <input type="text" class="url-input w-full border-slate-300 rounded-lg shadow-sm focus:border-blue-500 focus:ring-blue-500 p-3 border bg-slate-50" data-i18n-placeholder="placeholderUrl">
+                    <button type="button" id="add-url-btn" class="p-3 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition-colors" title="Add another link">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                    </button>
+                </div>
+            {% endif %}
+        </div>
+
+        {% if not item %}
+        <div class="flex items-center pt-2">
+            <input id="is-anonymous" type="checkbox" class="w-4 h-4 text-slate-900 bg-slate-100 border-slate-300 rounded focus:ring-slate-900 focus:ring-2">
+            <label for="is-anonymous" class="ml-2 text-sm font-medium text-slate-700" data-i18n="anonymousLabel">Share Anonymously</label>
+        </div>
+        {% endif %}
+
+        <button type="submit" id="submit-btn" class="w-full bg-slate-900 text-white font-bold py-3.5 px-4 rounded-lg hover:bg-slate-800 transition duration-200 shadow-md mt-4">
+            <span data-i18n="submitBtn">Submit Share</span>
+        </button>
+    </form>
+    <div id="status-message" class="hidden mt-6 p-4 rounded-lg text-center text-sm font-medium"></div>
+</div>
+{% endblock %}

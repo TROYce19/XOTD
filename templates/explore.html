@@ -1,0 +1,86 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="mt-12 mb-8 text-center">
+    <h1 class="text-3xl md:text-4xl font-extrabold text-slate-900 mb-4 tracking-tight" data-i18n="exploreTitle">Explore Past XOTDs</h1>
+    <p class="text-slate-500 max-w-2xl mx-auto" data-i18n="exploreSubtitle">Browse all the amazing words and concepts shared by our community.</p>
+</div>
+
+<div class="max-w-3xl mx-auto mb-8 flex flex-col sm:flex-row gap-4 justify-center items-center px-4">
+    <div class="relative w-full sm:w-2/3">
+        <input type="text" id="search-input" class="w-full border-slate-300 rounded-full pl-11 pr-4 py-3 shadow-sm focus:border-blue-500 focus:ring-blue-500 border bg-white transition-shadow" data-i18n-placeholder="placeholderSearch">
+        <svg class="w-5 h-5 text-slate-400 absolute left-4 top-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+    </div>
+    <div class="w-full sm:w-1/3 relative">
+        <input type="date" id="date-picker" class="w-full border-slate-300 rounded-full px-4 py-3 shadow-sm focus:border-blue-500 focus:ring-blue-500 border bg-white text-slate-600 transition-shadow">
+        <button id="clear-date-btn" class="hidden absolute right-4 top-3.5 text-slate-400 hover:text-red-500 transition-colors" title="Clear Date">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        </button>
+    </div>
+</div>
+
+<div class="flex flex-wrap justify-center gap-3 mb-4 px-4">
+    <button class="filter-btn px-5 py-2 rounded-full text-sm font-semibold bg-slate-900 text-white transition-colors shadow-sm" data-filter="all" data-i18n="filterAll">All</button>
+    <button class="filter-btn px-5 py-2 rounded-full text-sm font-medium bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 transition-colors" data-filter="word" data-i18n="filterWords">Words</button>
+    <button class="filter-btn px-5 py-2 rounded-full text-sm font-medium bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 transition-colors" data-filter="concept" data-i18n="filterConcepts">Concepts</button>
+    
+    <button id="toggle-others-btn" class="px-5 py-2 rounded-full text-sm font-medium bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 transition-colors flex items-center gap-1">
+        <span data-i18n="filterOthers">Others</span>
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+    </button>
+</div>
+
+<div id="custom-types-panel" class="hidden flex-wrap justify-center gap-2 mb-10 max-w-3xl mx-auto bg-slate-100 p-4 rounded-xl border border-slate-200 shadow-inner px-4">
+    <span class="text-xs text-slate-500 w-full text-center mb-2 font-semibold uppercase tracking-wider" data-i18n="customTypesLabel">Custom Categories</span>
+    <button class="filter-btn px-4 py-1.5 rounded-full text-xs font-semibold bg-white text-slate-600 border border-slate-300 hover:bg-slate-200 transition-colors" data-filter="only-others">All Others</button>
+    {% for ct in custom_types %}
+    <button class="filter-btn px-4 py-1.5 rounded-full text-xs font-medium bg-white text-slate-600 border border-slate-300 hover:bg-slate-200 transition-colors shadow-sm" data-filter="{{ ct }}">{{ ct }}</button>
+    {% endfor %}
+</div>
+
+<div class="grid md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-6xl mx-auto" id="explore-grid">
+    {% for item in items %}
+    <div class="item-card relative group bg-white rounded-2xl shadow-sm hover:shadow-md transition-all duration-300 p-6 border-t-4 flex flex-col 
+        {% if item.item_type == 'word' %} border-blue-500 
+        {% elif item.item_type == 'concept' %} border-emerald-500 
+        {% else %} border-purple-500 {% endif %}" 
+        data-type="{{ item.item_type }}"
+        data-date="{{ item.date_only }}">
+        
+        {% if session.get('username') == 'TROYCE' %}
+        <div class="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+            <a href="/edit-page/{{ item.id }}" class="p-2 bg-slate-100 text-blue-600 rounded-lg hover:bg-slate-200 transition-colors" title="Edit">✏️</a>
+            <button class="delete-btn p-2 bg-slate-100 text-red-600 rounded-lg hover:bg-red-200 transition-colors" data-id="{{ item.id }}" title="Delete">🗑️</button>
+        </div>
+        {% endif %}
+
+        <div class="flex justify-between items-start mb-4">
+            <span class="text-xs font-bold uppercase tracking-widest 
+                {% if item.item_type == 'word' %} text-blue-500 
+                {% elif item.item_type == 'concept' %} text-emerald-500 
+                {% else %} text-purple-500 {% endif %}">
+                {{ item.item_type }}
+            </span>
+            <span class="text-xs text-slate-400 font-medium">{{ item.date_only }}</span>
+        </div>
+        
+        <h3 class="text-xl font-bold text-slate-900 mb-3 searchable-text pr-16">
+            <span class="bilingual-text" data-lang="en">{{ item.name_en }}</span>
+            <span class="bilingual-text hidden" data-lang="zh">{{ item.name_zh }}</span>
+        </h3>
+        <p class="text-slate-600 text-sm leading-relaxed mb-4 line-clamp-3 searchable-text">
+            <span class="bilingual-text" data-lang="en">{{ item.def_en }}</span>
+            <span class="bilingual-text hidden" data-lang="zh">{{ item.def_zh }}</span>
+        </p>
+        
+        <div class="mt-auto pt-4 border-t border-slate-100">
+            <span class="text-xs text-slate-500"><span data-i18n="contributor">By</span>: <span class="font-medium text-slate-700">{{ item.author }}</span></span>
+        </div>
+    </div>
+    {% else %}
+    <div class="col-span-full text-center py-16 text-slate-500 italic" data-i18n="noData">No data yet. Be the first to submit!</div>
+    {% endfor %}
+</div>
+
+<div id="no-results-msg" class="hidden text-center py-16 text-slate-500 italic" data-i18n="noResults">No items match your search criteria.</div>
+{% endblock %}

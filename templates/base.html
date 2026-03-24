@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🍰 XOTD - X of the Day</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans min-h-screen flex flex-col">
+    
+    <nav class="bg-white border-b border-slate-200 shadow-sm sticky top-0 z-50">
+        <div class="container mx-auto px-6 py-4 flex justify-between items-center">
+            <a href="/" class="font-extrabold text-2xl text-slate-900 tracking-wider hover:text-blue-600 transition-colors">🍰 XOTD</a>
+            
+            <div class="flex items-center space-x-4 md:space-x-6">
+                <a href="/" class="text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors" data-i18n="navHome">Home</a>
+                <a href="/explore" class="text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors" data-i18n="navExplore">Explore</a>
+                
+                {% if session.get('user_id') %}
+                    <a href="/submit-page" class="text-sm font-medium text-white bg-slate-900 px-4 py-2 rounded-lg hover:bg-slate-800 transition-colors shadow-sm" data-i18n="navSubmit">Submit</a>
+                    
+                    <div class="hidden md:flex items-center space-x-3 border-l border-slate-200 pl-4 ml-2">
+                        <span class="text-sm font-semibold text-slate-700 bg-slate-100 px-3 py-1 rounded-full">👋 {{ session.get('username') }}</span>
+                        <a href="/logout" class="text-sm text-slate-400 hover:text-red-500 transition-colors" data-i18n="navLogout">Logout</a>
+                    </div>
+                {% else %}
+                    <div class="hidden md:flex items-center space-x-3 border-l border-slate-200 pl-4 ml-2">
+                        <a href="/login" class="text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors" data-i18n="navLogin">Login</a>
+                        <a href="/register" class="text-sm font-medium text-white bg-blue-600 px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors shadow-sm" data-i18n="navRegister">Sign Up</a>
+                    </div>
+                {% endif %}
+                
+                <select id="lang-switch" class="bg-slate-50 border border-slate-300 text-slate-700 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2 cursor-pointer transition-colors ml-4">
+                    <option value="en">English</option>
+                    <option value="zh">中文</option>
+                </select>
+            </div>
+        </div>
+    </nav>
+
+    <main class="container mx-auto px-4 pb-12 flex-grow">
+        {% block content %}
+        {% endblock %}
+    </main>
+
+    <footer class="text-center py-6 text-slate-400 text-sm border-t border-slate-200 mt-auto">
+        &copy; 2026 XOTD. All rights reserved.
+    </footer>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
