@@ -7,9 +7,44 @@ import random
 from functools import wraps
 from deep_translator import GoogleTranslator
 from werkzeug.security import generate_password_hash, check_password_hash
+import os
 
 app = Flask(__name__)
 app.secret_key = 'xotd_super_secret_key_2026'
+
+# ==== 核心新增：云端数据库自动初始化 ====
+def init_db():
+    conn = sqlite3.connect('xotd.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            item_type TEXT NOT NULL,
+            item_name TEXT NOT NULL,
+            translated_item TEXT,
+            definition TEXT NOT NULL,
+            translated_definition TEXT,
+            example TEXT,
+            reference_urls TEXT,
+            author TEXT DEFAULT '匿名用户',
+            user_id INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+# 每次启动应用时，确保数据库表存在
+init_db()
+# ========================================
 
 def get_db_connection():
     conn = sqlite3.connect('xotd.db')
@@ -37,7 +72,6 @@ def format_bilingual(row):
         item['def_zh'] = item['translated_definition'] or item['definition']
     return item
 
-# 提取翻译逻辑为复用函数
 def translate_text(item_name, definition):
     translated_item = ""
     translated_definition = ""
@@ -100,13 +134,11 @@ def register_page():
         return redirect(url_for('index'))
     return render_template('register.html')
 
-# 修改：上传与编辑共用一个页面模板
 @app.route('/submit-page')
 @login_required
 def submit_page():
     return render_template('submit.html', item=None)
 
-# 新增：管理员专属的编辑页面路由
 @app.route('/edit-page/<int:item_id>')
 @login_required
 def edit_page(item_id):
@@ -216,7 +248,6 @@ def submit():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# 新增：管理员专属的编辑 API
 @app.route('/api/edit/<int:item_id>', methods=['PUT'])
 @login_required
 def api_edit(item_id):
@@ -246,7 +277,6 @@ def api_edit(item_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# 新增：管理员专属的删除 API
 @app.route('/api/delete/<int:item_id>', methods=['DELETE'])
 @login_required
 def delete_item(item_id):
