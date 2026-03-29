@@ -4,17 +4,21 @@ import sqlite3
 import json
 import re
 import random
+import os
 from functools import wraps
 from deep_translator import GoogleTranslator
 from werkzeug.security import generate_password_hash, check_password_hash
-import os
 
 app = Flask(__name__)
 app.secret_key = 'xotd_super_secret_key_2026'
 
-# ==== 核心新增：云端数据库自动初始化 ====
+# ==== 核心修复：云端数据库持久化存储适配 ====
+# 如果检测到运行在 Azure 环境中，将数据库存入永久保险箱 /home 目录
+DB_PATH = '/home/xotd.db' if 'WEBSITE_SITE_NAME' in os.environ else 'xotd.db'
+
 def init_db():
-    conn = sqlite3.connect('xotd.db')
+    # 使用安全的 DB_PATH
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
@@ -42,12 +46,11 @@ def init_db():
     conn.commit()
     conn.close()
 
-# 每次启动应用时，确保数据库表存在
 init_db()
-# ========================================
 
 def get_db_connection():
-    conn = sqlite3.connect('xotd.db')
+    # 使用安全的 DB_PATH
+    conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row 
     return conn
 
