@@ -5,6 +5,8 @@ import json
 import re
 import random
 import os
+import smtplib
+from email.mime.text import MIMEText
 from functools import wraps
 from deep_translator import GoogleTranslator
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -12,12 +14,13 @@ from werkzeug.security import generate_password_hash, check_password_hash
 app = Flask(__name__)
 app.secret_key = 'xotd_super_secret_key_2026'
 
-# ==== 核心修复：云端数据库持久化存储适配 ====
-# 如果检测到运行在 Azure 环境中，将数据库存入永久保险箱 /home 目录
+# 这样写才是绝对安全的“无默认值”状态！
+NETEASE_EMAIL = os.environ.get('NETEASE_EMAIL')
+NETEASE_PASSWORD = os.environ.get('NETEASE_PASSWORD')
+
 DB_PATH = '/home/xotd.db' if 'WEBSITE_SITE_NAME' in os.environ else 'xotd.db'
 
 def init_db():
-    # 使用安全的 DB_PATH
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
@@ -28,6 +31,11 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN email TEXT UNIQUE")
+    except:
+        pass 
+        
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -49,7 +57,6 @@ def init_db():
 init_db()
 
 def get_db_connection():
-    # 使用安全的 DB_PATH
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row 
     return conn
@@ -114,7 +121,6 @@ def explore():
     conn = get_db_connection()
     rows = conn.execute("SELECT * FROM items ORDER BY created_at DESC").fetchall()
     conn.close()
-    
     items = []
     custom_types = set()
     for row in rows:
@@ -122,7 +128,6 @@ def explore():
         items.append(item)
         if item['item_type'] not in ['word', 'concept']:
             custom_types.add(item['item_type'])
-
     return render_template('explore.html', items=items, custom_types=list(custom_types))
 
 @app.route('/login')
@@ -147,35 +152,65 @@ def submit_page():
 def edit_page(item_id):
     if session.get('username') != 'TROYCE':
         return redirect(url_for('index'))
-    
     conn = get_db_connection()
     row = conn.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
     conn.close()
-    
     if not row:
         return redirect(url_for('index'))
-        
     return render_template('submit.html', item=format_bilingual(row))
 
 
 # ==== API 接口路由 ====
-@app.route('/api/captcha')
-def get_captcha():
-    num1 = random.randint(1, 9)
-    num2 = random.randint(1, 9)
-    session['captcha_answer'] = str(num1 + num2)
-    return jsonify({"question": f"{num1} + {num2} = ?"})
+
+@app.route('/api/send-code', methods=['POST'])
+def send_code():
+    data = request.json
+    email = data.get('email', '').strip()
+    
+    if not email or '@' not in email:
+        return jsonify({"error": "Invalid email format"}), 400
+        
+    conn = get_db_connection()
+    existing_user = conn.execute('SELECT * FROM users WHERE email = ?', (email,)).fetchone()
+    conn.close()
+    if existing_user:
+        return jsonify({"error": "Email already registered"}), 409
+
+    code = str(random.randint(100000, 999999))
+    session['email_code'] = code
+    session['reg_email'] = email
+
+    # 核心修改：使用网易的 SMTP_SSL
+    try:
+        msg = MIMEText(f"Hello!\n\nYour XOTD verification code is: {code}\n\nWelcome to the community!", 'plain', 'utf-8')
+        msg['Subject'] = 'XOTD - Your Verification Code'
+        msg['From'] = f"XOTD Community <{NETEASE_EMAIL}>"
+        msg['To'] = email
+
+        # 网易邮箱通常使用 465 端口的 SSL 加密
+        server = smtplib.SMTP_SSL('smtp.163.com', 465) 
+        server.login(NETEASE_EMAIL, NETEASE_PASSWORD)
+        server.sendmail(NETEASE_EMAIL, [email], msg.as_string())
+        server.quit()
+        
+        return jsonify({"message": "Code sent successfully"}), 200
+    except Exception as e:
+        print(f"SMTP Error: {e}")
+        return jsonify({"error": "Failed to send email. Check server configuration."}), 500
 
 @app.route('/api/register', methods=['POST'])
 def api_register():
     data = request.json
     username = data.get('username', '').strip()
+    email = data.get('email', '').strip()
     password = data.get('password', '')
-    user_captcha = data.get('captcha', '').strip()
+    user_code = data.get('code', '').strip()
 
-    correct_captcha = session.get('captcha_answer')
-    if not correct_captcha or user_captcha != correct_captcha:
-        return jsonify({"error": "Incorrect captcha / 验证码错误"}), 400
+    correct_code = session.get('email_code')
+    reg_email = session.get('reg_email')
+    
+    if not correct_code or user_code != correct_code or email != reg_email:
+        return jsonify({"error": "Invalid or expired verification code"}), 400
 
     if not username or not password or len(password) < 6:
         return jsonify({"error": "Invalid username or password (min 6 chars)"}), 400
@@ -184,15 +219,17 @@ def api_register():
 
     try:
         conn = get_db_connection()
-        cursor = conn.execute('INSERT INTO users (username, password_hash) VALUES (?, ?)', (username, hashed_pw))
+        cursor = conn.execute('INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)', (username, email, hashed_pw))
         conn.commit()
-        
         session['user_id'] = cursor.lastrowid
         session['username'] = username
-        session.pop('captcha_answer', None)
+        session.pop('email_code', None)
+        session.pop('reg_email', None)
         conn.close()
         return jsonify({"message": "Registration successful"}), 201
-    except sqlite3.IntegrityError:
+    except sqlite3.IntegrityError as e:
+        if 'email' in str(e).lower():
+            return jsonify({"error": "Email already exists"}), 409
         return jsonify({"error": "Username already exists"}), 409
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -202,7 +239,6 @@ def api_login():
     data = request.json
     username = data.get('username', '').strip()
     password = data.get('password', '')
-
     conn = get_db_connection()
     user = conn.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
     conn.close()
@@ -256,7 +292,6 @@ def submit():
 def api_edit(item_id):
     if session.get('username') != 'TROYCE':
         return jsonify({"error": "Admin access required"}), 403
-        
     data = request.json
     item_type = data.get('type')
     item_name = data.get('item')
@@ -264,9 +299,7 @@ def api_edit(item_id):
     example = data.get('example', '')
     reference_urls = data.get('reference_urls', [])
     urls_json = json.dumps(reference_urls)
-    
     translated_item, translated_definition = translate_text(item_name, definition)
-    
     try:
         conn = get_db_connection()
         conn.execute('''
