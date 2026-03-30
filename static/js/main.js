@@ -10,8 +10,11 @@ const translations = {
         registerTitle: "Join XOTD",
         registerSubtitle: "Start sharing your knowledge today.",
         usernameLabel: "Username",
+        emailLabel: "Email Address",
         passwordLabel: "Password",
-        captchaLabel: "Verification",
+        captchaLabel: "Email Verification Code",
+        sendCodeBtn: "Send Code",
+        codeSentMsg: "Sent!",
         anonymousLabel: "Share Anonymously",
         noAccountMsg: "Don't have an account?",
         hasAccountMsg: "Already have an account?",
@@ -33,7 +36,7 @@ const translations = {
         filterOthers: "Others",
         customTypesLabel: "Custom Categories",
         formTitle: "Share Your Knowledge",
-        editTitle: "Edit Knowledge", // 新增编辑标题
+        editTitle: "Edit Knowledge",
         formType: "Type",
         optionWord: "Word",
         optionConcept: "Concept",
@@ -51,10 +54,10 @@ const translations = {
         placeholderUrl: "wikipedia.org/wiki/...",
         placeholderCustomType: "e.g., Quote, Idiom...",
         placeholderSearch: "Search by keyword...",
-        captchaPlaceholder: "Answer",
+        codePlaceholder: "6-digit code",
         successMsg: "🎉 Success! Redirecting...",
         errorMsg: "❌ Failed. Please try again.",
-        confirmDelete: "Are you sure you want to permanently delete this item?" // 新增删除确认
+        confirmDelete: "Are you sure you want to permanently delete this item?"
     },
     zh: {
         navHome: "首页",
@@ -67,8 +70,11 @@ const translations = {
         registerTitle: "加入 XOTD",
         registerSubtitle: "今天就开始分享你的知识库吧。",
         usernameLabel: "用户名",
+        emailLabel: "邮箱地址",
         passwordLabel: "密码 (至少 6 位)",
-        captchaLabel: "验证码",
+        captchaLabel: "邮箱验证码",
+        sendCodeBtn: "发送验证码",
+        codeSentMsg: "已发送!",
         anonymousLabel: "匿名分享",
         noAccountMsg: "还没有账号？",
         hasAccountMsg: "已经有账号了？",
@@ -90,7 +96,7 @@ const translations = {
         filterOthers: "其他",
         customTypesLabel: "自定义分类",
         formTitle: "分享你的知识",
-        editTitle: "编辑内容", // 新增编辑标题
+        editTitle: "编辑内容",
         formType: "分享类型",
         optionWord: "单词",
         optionConcept: "概念",
@@ -108,10 +114,10 @@ const translations = {
         placeholderUrl: "zh.wikipedia.org/wiki/...",
         placeholderCustomType: "例如：名言、算法...",
         placeholderSearch: "输入关键词搜索...",
-        captchaPlaceholder: "输入答案",
+        codePlaceholder: "6 位数字验证码",
         successMsg: "🎉 成功！页面跳转中...",
         errorMsg: "❌ 失败，请重试。",
-        confirmDelete: "您确定要永久删除这条内容吗？" // 新增删除确认
+        confirmDelete: "您确定要永久删除这条内容吗？"
     }
 };
 
@@ -154,40 +160,67 @@ if (langSwitch) {
 }
 updateLanguage(currentLang);
 
+// ==== 邮箱验证码发送逻辑 ====
+const sendCodeBtn = document.getElementById('send-code-btn');
+const regEmailInput = document.getElementById('reg-email');
 
-async function loadCaptcha() {
-    const captchaText = document.getElementById('captcha-text');
-    if (captchaText) {
-        try {
-            const res = await fetch('/api/captcha');
-            const data = await res.json();
-            captchaText.textContent = data.question;
-        } catch (error) {
-            console.error("Failed to load captcha");
+if (sendCodeBtn && regEmailInput) {
+    sendCodeBtn.addEventListener('click', async () => {
+        const email = regEmailInput.value.trim();
+        if (!email || !email.includes('@')) {
+            alert(currentLang === 'en' ? 'Please enter a valid email.' : '请输入有效的邮箱地址。');
+            return;
         }
-    }
+
+        sendCodeBtn.disabled = true;
+        sendCodeBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        sendCodeBtn.innerText = currentLang === 'en' ? 'Sending...' : '发送中...';
+
+        try {
+            const response = await fetch('/api/send-code', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email: email })
+            });
+
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error);
+
+            let countdown = 60;
+            const timer = setInterval(() => {
+                sendCodeBtn.innerText = `${countdown}s`;
+                countdown--;
+                if (countdown < 0) {
+                    clearInterval(timer);
+                    sendCodeBtn.disabled = false;
+                    sendCodeBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                    sendCodeBtn.innerText = translations[currentLang].sendCodeBtn;
+                }
+            }, 1000);
+
+        } catch (error) {
+            alert('❌ ' + error.message);
+            sendCodeBtn.disabled = false;
+            sendCodeBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            sendCodeBtn.innerText = translations[currentLang].sendCodeBtn;
+        }
+    });
 }
 
-const refreshCaptchaBtn = document.getElementById('refresh-captcha');
-if (refreshCaptchaBtn) {
-    refreshCaptchaBtn.addEventListener('click', loadCaptcha);
-}
-loadCaptcha();
-
+// ==== 身份验证系统逻辑 (登录/注册) ====
 async function handleAuthSubmit(e, url, btnId, statusId) {
     e.preventDefault();
     const btn = document.getElementById(btnId);
     const statusDiv = document.getElementById(statusId);
     
-    const usernameInput = e.target.querySelector('input[type="text"]').value;
-    const passwordInput = e.target.querySelector('input[type="password"]').value;
-    const captchaEl = e.target.querySelector('#reg-captcha');
-    const captchaVal = captchaEl ? captchaEl.value : null;
+    const usernameInput = e.target.querySelector('input[type="text"]')?.value;
+    const passwordInput = e.target.querySelector('input[type="password"]')?.value;
+    const emailInput = e.target.querySelector('#reg-email')?.value;
+    const codeInput = e.target.querySelector('#reg-code')?.value;
 
     const payload = { username: usernameInput, password: passwordInput };
-    if (captchaVal !== null) {
-        payload.captcha = captchaVal;
-    }
+    if (emailInput) payload.email = emailInput;
+    if (codeInput) payload.code = codeInput;
 
     btn.disabled = true;
     btn.classList.add('opacity-75');
@@ -212,8 +245,6 @@ async function handleAuthSubmit(e, url, btnId, statusId) {
         statusDiv.textContent = '❌ ' + error.message;
         btn.disabled = false;
         btn.classList.remove('opacity-75');
-        loadCaptcha();
-        if(captchaEl) captchaEl.value = '';
     }
 }
 
@@ -234,7 +265,6 @@ document.addEventListener('click', async (e) => {
         try {
             const response = await fetch(`/api/delete/${itemId}`, { method: 'DELETE' });
             if (response.ok) {
-                // 删除成功后原地刷新页面以显示最新结果
                 window.location.reload();
             } else {
                 alert(translations[currentLang].errorMsg);
@@ -246,7 +276,7 @@ document.addEventListener('click', async (e) => {
     }
 });
 
-
+// ==== 上传页逻辑 ====
 const typeSelect = document.getElementById('item-type');
 const customTypeInput = document.getElementById('custom-type');
 if (typeSelect && customTypeInput) {
@@ -307,8 +337,6 @@ if (submitForm) {
         }
 
         const isAnonymous = document.getElementById('is-anonymous') ? document.getElementById('is-anonymous').checked : false;
-        
-        // 核心：判断是新建还是编辑
         const editId = document.getElementById('edit-item-id') ? document.getElementById('edit-item-id').value : '';
         const endpoint = editId ? `/api/edit/${editId}` : '/api/submit';
         const method = editId ? 'PUT' : 'POST';
