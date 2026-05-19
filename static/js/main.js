@@ -183,7 +183,7 @@ if (sendCodeBtn && regEmailInput) {
                 body: JSON.stringify({ email: email })
             });
 
-            const data = await response.json();
+            const data = await safeParseJSON(response);
             if (!response.ok) throw new Error(data.error);
 
             let countdown = 60;
@@ -205,6 +205,17 @@ if (sendCodeBtn && regEmailInput) {
             sendCodeBtn.innerText = translations[currentLang].sendCodeBtn;
         }
     });
+}
+
+// ==== 安全解析 JSON 响应的辅助函数 ====
+async function safeParseJSON(response) {
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+        const text = await response.text();
+        console.error('Non-JSON response:', text.substring(0, 200));
+        throw new Error('Server returned an unexpected response. Please try again later.');
+    }
+    return response.json();
 }
 
 // ==== 身份验证系统逻辑 (登录/注册) ====
@@ -231,7 +242,7 @@ async function handleAuthSubmit(e, url, btnId, statusId) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
-        const data = await response.json();
+        const data = await safeParseJSON(response);
         statusDiv.className = 'mt-4 p-3 rounded-lg text-center text-sm font-medium block';
         if (response.ok) {
             statusDiv.classList.add('bg-green-50', 'text-green-700');

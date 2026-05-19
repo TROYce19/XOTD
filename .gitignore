@@ -1,0 +1,22 @@
+# ⚠️ 极其重要：忽略 .env 环境变量文件，防止邮箱密码等敏感信息泄露！
+.env
+
+# ⚠️ 极其重要：忽略本地测试数据库，防止数据和密码泄露
+xotd.db
+
+# 忽略 VS Code 配置
+.vs/
+
+# 忽略 Python 缓存文件
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 忽略虚拟环境
+venv/
+env/
+antenv/
+
+# 忽略系统文件
+.DS_Store
+Thumbs.db

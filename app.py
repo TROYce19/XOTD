@@ -10,9 +10,12 @@ from email.mime.text import MIMEText
 from functools import wraps
 from deep_translator import GoogleTranslator
 from werkzeug.security import generate_password_hash, check_password_hash
+from dotenv import load_dotenv
+
+load_dotenv()  # 加载 .env 文件中的环境变量
 
 app = Flask(__name__)
-app.secret_key = 'xotd_super_secret_key_2026'
+app.secret_key = os.environ.get('SECRET_KEY', 'xotd_dev_secret_key_2026')
 
 # 这样写才是绝对安全的“无默认值”状态！
 NETEASE_EMAIL = os.environ.get('NETEASE_EMAIL')
@@ -27,14 +30,15 @@ def init_db():
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
+            email TEXT UNIQUE,
             password_hash TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
     try:
-        cursor.execute("ALTER TABLE users ADD COLUMN email TEXT UNIQUE")
-    except:
-        pass 
+        cursor.execute("ALTER TABLE users ADD COLUMN email TEXT")
+    except sqlite3.OperationalError:
+        pass  # 列已存在，忽略
         
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS items (
@@ -164,6 +168,9 @@ def edit_page(item_id):
 
 @app.route('/api/send-code', methods=['POST'])
 def send_code():
+    if not NETEASE_EMAIL or not NETEASE_PASSWORD:
+        return jsonify({"error": "Email service not configured. Please contact the administrator."}), 503
+
     data = request.json
     email = data.get('email', '').strip()
     
