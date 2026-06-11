@@ -28,6 +28,17 @@ const translations = {
         noResults: "No items match your search criteria.",
         todayCount: "shared today",
         todayLabel: "Today",
+        attachLabel: "Attachments (Optional)",
+        attachHint: "Images · .md · .txt · .pdf — max 10 MB each",
+        dropText: "Drag files here, or click to browse",
+        uploadingLabel: "Uploading…",
+        uploadFailed: "Upload failed",
+        fileTooBig: "File exceeds 10 MB",
+        fileTypeBad: "Unsupported file type",
+        waitUploads: "Files are still uploading, please wait a moment.",
+        backLink: "Back",
+        downloadBtn: "Download",
+        viewerLoading: "Loading…",
         wordTitle: "Word of the Day",
         conceptTitle: "Concept of the Day",
         exploreTitle: "Explore Past XOTDs",
@@ -90,6 +101,17 @@ const translations = {
         noResults: "没有找到符合条件的分享内容。",
         todayCount: "条今日分享",
         todayLabel: "今天",
+        attachLabel: "附件 (选填)",
+        attachHint: "图片 · .md · .txt · .pdf — 单个不超过 10 MB",
+        dropText: "拖拽文件到这里,或点击选择",
+        uploadingLabel: "上传中…",
+        uploadFailed: "上传失败",
+        fileTooBig: "文件超过 10 MB",
+        fileTypeBad: "不支持的文件类型",
+        waitUploads: "文件还在上传中,请稍候。",
+        backLink: "返回",
+        downloadBtn: "下载",
+        viewerLoading: "加载中…",
         wordTitle: "今日单词",
         conceptTitle: "今日概念",
         exploreTitle: "探索往期 XOTD",
@@ -326,6 +348,11 @@ const submitForm = document.getElementById('submission-form');
 if (submitForm) {
     submitForm.addEventListener('submit', async (e) => {
         e.preventDefault();
+        // 有附件还在上传时先等待,避免提交后丢失关联
+        if (typeof hasPendingUploads === 'function' && hasPendingUploads()) {
+            alert(translations[currentLang].waitUploads);
+            return;
+        }
         const submitBtn = document.getElementById('submit-btn');
         const btnTextSpan = submitBtn.querySelector('span');
         const statusDiv = document.getElementById('status-message');
@@ -361,7 +388,8 @@ if (submitForm) {
             definition: document.getElementById('item-definition').value,
             example: document.getElementById('item-example').value,
             reference_urls: reference_urls,
-            is_anonymous: isAnonymous 
+            is_anonymous: isAnonymous,
+            attachment_ids: (typeof getPendingAttachmentIds === 'function') ? getPendingAttachmentIds() : []
         };
 
         try {
@@ -597,6 +625,125 @@ document.querySelectorAll('[data-countup]').forEach(el => {
         if (!rafId) rafId = requestAnimationFrame(loop);
     }, { passive: true });
 })();
+
+// ==== 提交页:文件 / 图片上传 ====
+const uploadDropzone = document.getElementById('dropzone');
+const uploadInput = document.getElementById('file-input');
+const uploadList = document.getElementById('file-list');
+const UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
+const UPLOAD_IMAGE_EXT = ['png', 'jpg', 'jpeg', 'gif', 'webp'];
+const UPLOAD_DOC_EXT = ['md', 'txt', 'pdf'];
+
+// 供提交逻辑读取:已上传成功的附件 id 列表
+function getPendingAttachmentIds() {
+    if (!uploadList) return [];
+    return Array.from(uploadList.querySelectorAll('[data-uploaded-id]'))
+        .map(el => parseInt(el.getAttribute('data-uploaded-id'), 10))
+        .filter(n => !isNaN(n));
+}
+
+// 是否还有未完成(且未出错)的上传
+function hasPendingUploads() {
+    if (!uploadList) return false;
+    return Array.from(uploadList.querySelectorAll('.file-entry'))
+        .some(el => !el.hasAttribute('data-uploaded-id') && !el.classList.contains('is-error'));
+}
+
+function fileSizeLabel(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+async function uploadOneFile(file) {
+    const ext = file.name.includes('.') ? file.name.split('.').pop().toLowerCase() : '';
+    const isImage = UPLOAD_IMAGE_EXT.includes(ext);
+
+    const entry = document.createElement('div');
+    entry.className = 'file-entry';
+    entry.innerHTML = `
+        ${isImage
+            ? `<img class="file-thumb" src="${URL.createObjectURL(file)}" alt="">`
+            : `<span class="file-thumb file-thumb-doc">.${ext || '?'}</span>`}
+        <span class="file-name"></span>
+        <span class="file-status"></span>
+        <button type="button" class="file-remove icon-btn icon-btn-danger" title="Remove">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"></path></svg>
+        </button>
+    `;
+    entry.querySelector('.file-name').textContent = file.name;
+    const statusEl = entry.querySelector('.file-status');
+    uploadList.appendChild(entry);
+
+    entry.querySelector('.file-remove').addEventListener('click', () => {
+        const uploadedId = entry.getAttribute('data-uploaded-id');
+        if (uploadedId) fetch(`/api/attachment/${uploadedId}`, { method: 'DELETE' });
+        entry.remove();
+    });
+
+    if (!UPLOAD_IMAGE_EXT.includes(ext) && !UPLOAD_DOC_EXT.includes(ext)) {
+        statusEl.textContent = translations[currentLang].fileTypeBad;
+        entry.classList.add('is-error');
+        return;
+    }
+    if (file.size > UPLOAD_MAX_BYTES) {
+        statusEl.textContent = translations[currentLang].fileTooBig;
+        entry.classList.add('is-error');
+        return;
+    }
+
+    statusEl.textContent = translations[currentLang].uploadingLabel;
+    try {
+        const formData = new FormData();
+        formData.append('file', file);
+        const response = await fetch('/api/upload', { method: 'POST', body: formData });
+        const data = await safeParseJSON(response);
+        if (!response.ok) throw new Error(data.error || 'Upload failed');
+        entry.setAttribute('data-uploaded-id', data.id);
+        statusEl.textContent = fileSizeLabel(file.size);
+    } catch (err) {
+        statusEl.textContent = translations[currentLang].uploadFailed + (err.message ? `: ${err.message}` : '');
+        entry.classList.add('is-error');
+    }
+}
+
+if (uploadDropzone && uploadInput && uploadList) {
+    uploadDropzone.addEventListener('click', () => uploadInput.click());
+    uploadDropzone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        uploadDropzone.classList.add('is-drag');
+    });
+    uploadDropzone.addEventListener('dragleave', () => uploadDropzone.classList.remove('is-drag'));
+    uploadDropzone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        uploadDropzone.classList.remove('is-drag');
+        Array.from(e.dataTransfer.files || []).forEach(uploadOneFile);
+    });
+    uploadInput.addEventListener('change', () => {
+        Array.from(uploadInput.files || []).forEach(uploadOneFile);
+        uploadInput.value = '';
+    });
+}
+
+// 编辑页:移除已挂载到条目的附件(管理员)
+const existingFilesEl = document.getElementById('existing-files');
+if (existingFilesEl) {
+    existingFilesEl.addEventListener('click', async (e) => {
+        const btn = e.target.closest('.att-remove');
+        if (!btn) return;
+        if (!confirm(translations[currentLang].confirmDelete)) return;
+        try {
+            const response = await fetch(`/api/attachment/${btn.getAttribute('data-id')}`, { method: 'DELETE' });
+            if (response.ok) {
+                btn.closest('.file-entry').remove();
+            } else {
+                alert(translations[currentLang].errorMsg);
+            }
+        } catch (err) {
+            alert('Network error.');
+        }
+    });
+}
 
 // ==== 移动端折叠菜单 ====
 (function initMobileNav() {

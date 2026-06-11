@@ -31,6 +31,13 @@
         </div>
         {% endif %}
 
+        {% if item.images %}
+        <a href="/view/{{ item.images[0].id }}" class="card-cover">
+            <img src="/files/{{ item.images[0].stored_name }}" alt="{{ item.images[0].original_name }}" loading="lazy">
+            {% if item.images|length > 1 %}<span class="cover-count">+{{ item.images|length - 1 }}</span>{% endif %}
+        </a>
+        {% endif %}
+
         <div class="card-head">
             <span class="type-badge"><span class="type-dot"></span>{{ item.item_type }}</span>
             <span class="card-date" data-i18n="todayLabel">Today</span>
@@ -56,6 +63,20 @@
                 <span data-i18n="readMore">Ref</span>
                 <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"></path></svg>
             </a>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if item.docs or item.images|length > 1 %}
+        <div class="ref-row">
+            {% for doc in item.docs %}
+            <a href="/view/{{ doc.id }}" class="ref-chip file-chip">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path></svg>
+                <span class="file-chip-name">{{ doc.original_name }}</span>
+            </a>
+            {% endfor %}
+            {% for img in item.images[1:] %}
+            <a href="/view/{{ img.id }}" class="thumb-mini"><img src="/files/{{ img.stored_name }}" alt="" loading="lazy"></a>
             {% endfor %}
         </div>
         {% endif %}

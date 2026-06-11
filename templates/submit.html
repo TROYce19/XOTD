@@ -40,6 +40,39 @@
             <textarea id="item-example" rows="2" class="field-input" data-i18n-placeholder="placeholderExample">{{ item.example if item else '' }}</textarea>
         </div>
 
+        <div>
+            <label class="field-label">
+                <span data-i18n="attachLabel">Attachments (Optional)</span>
+                <span class="field-hint" data-i18n="attachHint">Images · .md · .txt · .pdf — max 10 MB each</span>
+            </label>
+
+            {% if item and item.attachments %}
+            <div id="existing-files" class="file-list" style="margin-bottom: var(--space-3);">
+                {% for att in item.attachments %}
+                <div class="file-entry">
+                    {% if att.kind == 'image' %}
+                    <img class="file-thumb" src="/files/{{ att.stored_name }}" alt="">
+                    {% else %}
+                    <span class="file-thumb file-thumb-doc">.{{ att.ext }}</span>
+                    {% endif %}
+                    <a href="/view/{{ att.id }}" target="_blank" class="file-name">{{ att.original_name }}</a>
+                    <span class="file-status">{{ att.ext|upper }}</span>
+                    <button type="button" class="att-remove icon-btn icon-btn-danger" data-id="{{ att.id }}" title="Remove">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"></path></svg>
+                    </button>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <div id="dropzone" class="dropzone">
+                <input type="file" id="file-input" class="hidden" multiple accept=".png,.jpg,.jpeg,.gif,.webp,.md,.txt,.pdf">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"></path></svg>
+                <p class="dropzone-text" data-i18n="dropText">Drag files here, or click to browse</p>
+            </div>
+            <div id="file-list" class="file-list"></div>
+        </div>
+
         <div id="url-container" class="url-stack">
             <label class="field-label" style="margin-bottom: 0;">
                 <span data-i18n="formUrl">Reference Links (Optional)</span>
