@@ -3,48 +3,91 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🍰 XOTD - X of the Day</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <title>XOTD — X of the Day</title>
+    <script>
+        /* 在样式加载前定下主题,避免闪烁 */
+        (function () {
+            var t = localStorage.getItem('xotd_theme');
+            if (t !== 'light' && t !== 'dark') {
+                t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            }
+            document.documentElement.setAttribute('data-theme', t);
+        })();
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Serif+SC:wght@600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
-<body class="bg-slate-50 text-slate-800 font-sans min-h-screen flex flex-col">
-    
-    <nav class="bg-white border-b border-slate-200 shadow-sm sticky top-0 z-50">
-        <div class="container mx-auto px-6 py-4 flex justify-between items-center">
-            <a href="/" class="font-extrabold text-2xl text-slate-900 tracking-wider hover:text-blue-600 transition-colors">🍰 XOTD</a>
-            
-            <div class="flex items-center space-x-4 md:space-x-6">
-                <a href="/" class="text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors" data-i18n="navHome">Home</a>
-                <a href="/explore" class="text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors" data-i18n="navExplore">Explore</a>
-                
+<body>
+
+    <div id="progress-bar" aria-hidden="true"></div>
+    <div id="cursor-glow" aria-hidden="true"></div>
+
+    <header class="site-nav">
+        <div class="container nav-inner">
+            <a href="/" class="brand">
+                <span class="brand-mark">X</span>
+                <span class="brand-name">XOTD</span>
+            </a>
+
+            <nav class="nav-links">
+                <a href="/" class="nav-link" data-i18n="navHome">Home</a>
+                <a href="/explore" class="nav-link" data-i18n="navExplore">Explore</a>
+            </nav>
+
+            <div class="nav-actions">
                 {% if session.get('user_id') %}
-                    <a href="/submit-page" class="text-sm font-medium text-white bg-slate-900 px-4 py-2 rounded-lg hover:bg-slate-800 transition-colors shadow-sm" data-i18n="navSubmit">Submit</a>
-                    
-                    <div class="hidden md:flex items-center space-x-3 border-l border-slate-200 pl-4 ml-2">
-                        <span class="text-sm font-semibold text-slate-700 bg-slate-100 px-3 py-1 rounded-full">👋 {{ session.get('username') }}</span>
-                        <a href="/logout" class="text-sm text-slate-400 hover:text-red-500 transition-colors" data-i18n="navLogout">Logout</a>
+                    <a href="/submit-page" class="btn btn-primary nav-submit" data-i18n="navSubmit">Submit</a>
+                    <div class="nav-user">
+                        <span class="user-chip">
+                            <span class="user-avatar">{{ session.get('username')[:1]|upper }}</span>
+                            {{ session.get('username') }}
+                        </span>
+                        <a href="/logout" class="nav-link nav-link-muted" data-i18n="navLogout">Logout</a>
                     </div>
                 {% else %}
-                    <div class="hidden md:flex items-center space-x-3 border-l border-slate-200 pl-4 ml-2">
-                        <a href="/login" class="text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors" data-i18n="navLogin">Login</a>
-                        <a href="/register" class="text-sm font-medium text-white bg-blue-600 px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors shadow-sm" data-i18n="navRegister">Sign Up</a>
+                    <div class="nav-auth">
+                        <a href="/login" class="nav-link" data-i18n="navLogin">Login</a>
+                        <a href="/register" class="btn btn-primary" data-i18n="navRegister">Sign Up</a>
                     </div>
                 {% endif %}
-                
-                <select id="lang-switch" class="bg-slate-50 border border-slate-300 text-slate-700 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2 cursor-pointer transition-colors ml-4">
-                    <option value="en">English</option>
+
+                <select id="lang-switch" class="lang-select" aria-label="Language">
+                    <option value="en">EN</option>
                     <option value="zh">中文</option>
                 </select>
+
+                <button id="theme-toggle" class="icon-btn" aria-label="Toggle theme">
+                    <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+                    <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"></path></svg>
+                </button>
+
+                <button id="nav-toggle" class="icon-btn nav-toggle" aria-label="Menu" aria-expanded="false">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
+                </button>
             </div>
         </div>
-    </nav>
 
-    <main class="container mx-auto px-4 pb-12 flex-grow">
+        <nav id="nav-menu" class="nav-menu" aria-label="Mobile menu">
+            <a href="/" class="nav-menu-link" data-i18n="navHome">Home</a>
+            <a href="/explore" class="nav-menu-link" data-i18n="navExplore">Explore</a>
+            {% if session.get('user_id') %}
+                <a href="/submit-page" class="nav-menu-link" data-i18n="navSubmit">Submit</a>
+                <a href="/logout" class="nav-menu-link" data-i18n="navLogout">Logout</a>
+            {% else %}
+                <a href="/login" class="nav-menu-link" data-i18n="navLogin">Login</a>
+                <a href="/register" class="nav-menu-link" data-i18n="navRegister">Sign Up</a>
+            {% endif %}
+        </nav>
+    </header>
+
+    <main class="container page">
         {% block content %}
         {% endblock %}
     </main>
 
-    <footer class="text-center py-6 text-slate-400 text-sm border-t border-slate-200 mt-auto">
+    <footer class="site-footer">
         &copy; 2026 XOTD. All rights reserved.
     </footer>
 

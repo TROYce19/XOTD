@@ -18,7 +18,7 @@ const translations = {
         anonymousLabel: "Share Anonymously",
         noAccountMsg: "Don't have an account?",
         hasAccountMsg: "Already have an account?",
-        title: "🍰 XOTD",
+        title: "XOTD",
         subtitle: "Learn, discover, and share knowledge with the world, one day at a time.",
         todayHighlights: "Today's Highlights",
         contributor: "By",
@@ -26,6 +26,8 @@ const translations = {
         noDataToday: "No one has shared anything today yet.",
         noData: "No data yet. Be the first to submit!",
         noResults: "No items match your search criteria.",
+        todayCount: "shared today",
+        todayLabel: "Today",
         wordTitle: "Word of the Day",
         conceptTitle: "Concept of the Day",
         exploreTitle: "Explore Past XOTDs",
@@ -78,7 +80,7 @@ const translations = {
         anonymousLabel: "匿名分享",
         noAccountMsg: "还没有账号？",
         hasAccountMsg: "已经有账号了？",
-        title: "🍰 XOTD",
+        title: "XOTD",
         subtitle: "每天进步一点点，发现、学习并与世界分享知识。",
         todayHighlights: "今日精选",
         contributor: "贡献者",
@@ -86,6 +88,8 @@ const translations = {
         noDataToday: "今天还没有人分享内容哦。",
         noData: "暂无数据，快来贡献第一个吧！",
         noResults: "没有找到符合条件的分享内容。",
+        todayCount: "条今日分享",
+        todayLabel: "今天",
         wordTitle: "今日单词",
         conceptTitle: "今日概念",
         exploreTitle: "探索往期 XOTD",
@@ -243,16 +247,15 @@ async function handleAuthSubmit(e, url, btnId, statusId) {
             body: JSON.stringify(payload)
         });
         const data = await safeParseJSON(response);
-        statusDiv.className = 'mt-4 p-3 rounded-lg text-center text-sm font-medium block';
         if (response.ok) {
-            statusDiv.classList.add('bg-green-50', 'text-green-700');
+            statusDiv.className = 'status-msg is-success';
             statusDiv.textContent = translations[currentLang].successMsg;
             setTimeout(() => { window.location.href = '/'; }, 1000);
         } else {
             throw new Error(data.error || 'Authentication failed');
         }
     } catch (error) {
-        statusDiv.className = 'mt-4 p-3 rounded-lg text-center text-sm font-medium block bg-red-50 text-red-700';
+        statusDiv.className = 'status-msg is-error';
         statusDiv.textContent = '❌ ' + error.message;
         btn.disabled = false;
         btn.classList.remove('opacity-75');
@@ -308,11 +311,11 @@ if (addUrlBtn) {
     addUrlBtn.addEventListener('click', () => {
         const container = document.getElementById('url-container');
         const newGroup = document.createElement('div');
-        newGroup.className = 'flex items-center gap-2 mt-3';
+        newGroup.className = 'url-row';
         newGroup.innerHTML = `
-            <input type="text" class="url-input w-full border-slate-300 rounded-lg shadow-sm focus:border-blue-500 focus:ring-blue-500 p-3 border bg-slate-50" placeholder="${translations[currentLang].placeholderUrl}">
-            <button type="button" class="remove-url-btn p-3 bg-red-50 text-red-500 rounded-lg hover:bg-red-100 transition-colors" onclick="this.parentElement.remove()">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"></path></svg>
+            <input type="text" class="url-input field-input" placeholder="${translations[currentLang].placeholderUrl}">
+            <button type="button" class="remove-url-btn icon-btn icon-btn-lg icon-btn-danger" onclick="this.parentElement.remove()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M20 12H4"></path></svg>
             </button>
         `;
         container.appendChild(newGroup);
@@ -370,14 +373,14 @@ if (submitForm) {
 
             if (!response.ok) throw new Error('Network response was not ok');
             
-            statusDiv.className = 'mt-6 p-4 rounded-lg text-center text-sm font-medium block bg-green-50 text-green-700';
+            statusDiv.className = 'status-msg is-success';
             statusDiv.textContent = translations[currentLang].successMsg;
             
             setTimeout(() => { window.location.href = '/'; }, 1000);
             
         } catch (error) {
             console.error('Submission Error:', error);
-            statusDiv.className = 'mt-6 p-4 rounded-lg text-center text-sm font-medium block bg-red-50 text-red-700';
+            statusDiv.className = 'status-msg is-error';
             statusDiv.textContent = translations[currentLang].errorMsg;
             submitBtn.disabled = false;
             submitBtn.classList.remove('opacity-75', 'cursor-not-allowed');
@@ -430,7 +433,14 @@ function applyAllFilters() {
         let matchDate = (selectedDate === '') || (cardDate === selectedDate);
 
         if (matchCategory && matchKeyword && matchDate) {
+            const wasHidden = card.style.display === 'none';
             card.style.display = 'flex';
+            // 重新进入视图的卡片做一次轻量的淡入位移
+            if (wasHidden) {
+                card.classList.remove('card-pop');
+                void card.offsetWidth;
+                card.classList.add('card-pop');
+            }
             visibleCount++;
         } else {
             card.style.display = 'none';
@@ -472,15 +482,135 @@ if (clearDateBtn) {
 if (filterBtns.length > 0) {
     filterBtns.forEach(btn => {
         btn.addEventListener('click', () => {
-            filterBtns.forEach(b => {
-                b.classList.remove('bg-slate-900', 'text-white', 'font-semibold');
-                b.classList.add('bg-white', 'text-slate-600', 'font-medium');
-            });
-            btn.classList.remove('bg-white', 'text-slate-600', 'font-medium');
-            btn.classList.add('bg-slate-900', 'text-white', 'font-semibold');
+            filterBtns.forEach(b => b.classList.remove('is-active'));
+            btn.classList.add('is-active');
 
             currentActiveFilter = btn.getAttribute('data-filter');
             applyAllFilters();
         });
     });
 }
+
+/* ============================================================
+   以下为纯视觉/动效模块,不涉及任何数据逻辑
+   ============================================================ */
+const PREFERS_REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// ==== 主题切换(light/dark,带平滑过渡) ====
+const themeToggleBtn = document.getElementById('theme-toggle');
+if (themeToggleBtn) {
+    themeToggleBtn.addEventListener('click', () => {
+        const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+        document.documentElement.classList.add('theme-transition');
+        document.documentElement.setAttribute('data-theme', next);
+        localStorage.setItem('xotd_theme', next);
+        setTimeout(() => document.documentElement.classList.remove('theme-transition'), 500);
+    });
+}
+
+// ==== 滚动触发 reveal(IntersectionObserver + stagger 入场) ====
+(function initReveal() {
+    const revealEls = document.querySelectorAll('[data-reveal]');
+    if (!revealEls.length) return;
+
+    if (PREFERS_REDUCED_MOTION || !('IntersectionObserver' in window)) {
+        revealEls.forEach(el => el.classList.add('is-visible'));
+        return;
+    }
+
+    const io = new IntersectionObserver((entries) => {
+        // 同批进入视口的元素依次延迟 70ms,封顶 490ms
+        const visible = entries.filter(e => e.isIntersecting);
+        visible.forEach((entry, i) => {
+            entry.target.style.setProperty('--reveal-delay', `${Math.min(i, 7) * 70}ms`);
+            entry.target.classList.add('is-visible');
+            io.unobserve(entry.target);
+        });
+    }, { threshold: 0.1, rootMargin: '0px 0px -6% 0px' });
+
+    revealEls.forEach(el => io.observe(el));
+})();
+
+// ==== 数字滚动动画 ====
+document.querySelectorAll('[data-countup]').forEach(el => {
+    const target = parseInt(el.textContent.replace(/\D/g, ''), 10) || 0;
+    if (PREFERS_REDUCED_MOTION || target === 0) {
+        el.textContent = target;
+        return;
+    }
+    const duration = 900;
+    const start = performance.now();
+    (function tick(now) {
+        const p = Math.min((now - start) / duration, 1);
+        const eased = 1 - Math.pow(1 - p, 3);
+        el.textContent = Math.round(target * eased);
+        if (p < 1) requestAnimationFrame(tick);
+    })(start);
+});
+
+// ==== 页面顶部阅读进度条 ====
+(function initProgressBar() {
+    const bar = document.getElementById('progress-bar');
+    if (!bar) return;
+    let ticking = false;
+    function update() {
+        const doc = document.documentElement;
+        const max = doc.scrollHeight - doc.clientHeight;
+        bar.style.transform = `scaleX(${max > 0 ? doc.scrollTop / max : 0})`;
+        ticking = false;
+    }
+    document.addEventListener('scroll', () => {
+        if (!ticking) {
+            ticking = true;
+            requestAnimationFrame(update);
+        }
+    }, { passive: true });
+    update();
+})();
+
+// ==== 鼠标跟随光晕(仅桌面精确指针) ====
+(function initCursorGlow() {
+    const glow = document.getElementById('cursor-glow');
+    if (!glow || PREFERS_REDUCED_MOTION) return;
+    if (!window.matchMedia('(hover: hover) and (pointer: fine)').matches) return;
+
+    const HALF = 320; // 光晕直径 640px 的一半
+    let targetX = window.innerWidth / 2, targetY = window.innerHeight / 3;
+    let x = targetX, y = targetY;
+    let rafId = null;
+
+    function loop() {
+        x += (targetX - x) * 0.08;
+        y += (targetY - y) * 0.08;
+        glow.style.transform = `translate3d(${x - HALF}px, ${y - HALF}px, 0)`;
+        if (Math.abs(targetX - x) > 0.5 || Math.abs(targetY - y) > 0.5) {
+            rafId = requestAnimationFrame(loop);
+        } else {
+            rafId = null;
+        }
+    }
+
+    window.addEventListener('mousemove', (e) => {
+        targetX = e.clientX;
+        targetY = e.clientY;
+        glow.classList.add('is-on');
+        if (!rafId) rafId = requestAnimationFrame(loop);
+    }, { passive: true });
+})();
+
+// ==== 移动端折叠菜单 ====
+(function initMobileNav() {
+    const toggle = document.getElementById('nav-toggle');
+    const menu = document.getElementById('nav-menu');
+    if (!toggle || !menu) return;
+    toggle.addEventListener('click', () => {
+        const open = menu.classList.toggle('is-open');
+        toggle.setAttribute('aria-expanded', open);
+    });
+    menu.addEventListener('click', (e) => {
+        if (e.target.closest('a')) {
+            menu.classList.remove('is-open');
+            toggle.setAttribute('aria-expanded', 'false');
+        }
+    });
+})();

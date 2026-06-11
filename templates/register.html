@@ -1,51 +1,51 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<div class="max-w-md mx-auto bg-white rounded-2xl shadow-sm p-8 md:p-10 border border-slate-100 mt-20">
-    <div class="text-center mb-8">
-        <div class="inline-flex justify-center items-center w-16 h-16 rounded-full bg-emerald-50 text-emerald-600 mb-4">
-            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
+<div class="panel panel-narrow" data-reveal>
+    <div class="panel-head">
+        <div class="panel-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
         </div>
-        <h2 class="text-2xl font-bold text-slate-800" data-i18n="registerTitle">Join XOTD</h2>
-        <p class="text-sm text-slate-500 mt-2" data-i18n="registerSubtitle">Start sharing your knowledge today.</p>
+        <h2 class="panel-title" data-i18n="registerTitle">Join XOTD</h2>
+        <p class="panel-sub" data-i18n="registerSubtitle">Start sharing your knowledge today.</p>
     </div>
 
-    <form id="register-form" class="space-y-6">
+    <form id="register-form" class="form-stack">
         <div>
-            <label class="block text-sm font-semibold text-slate-700 mb-2" data-i18n="usernameLabel">Username</label>
-            <input type="text" id="reg-username" required minlength="2" class="w-full border-slate-300 rounded-lg shadow-sm focus:border-blue-500 focus:ring-blue-500 p-3 border bg-slate-50">
-        </div>
-        
-        <div>
-            <label class="block text-sm font-semibold text-slate-700 mb-2" data-i18n="emailLabel">Email Address</label>
-            <input type="email" id="reg-email" required class="w-full border-slate-300 rounded-lg shadow-sm focus:border-blue-500 focus:ring-blue-500 p-3 border bg-slate-50">
+            <label class="field-label" data-i18n="usernameLabel">Username</label>
+            <input type="text" id="reg-username" required minlength="2" class="field-input">
         </div>
 
         <div>
-            <label class="block text-sm font-semibold text-slate-700 mb-2" data-i18n="captchaLabel">Email Verification Code</label>
-            <div class="flex items-center gap-3">
-                <input type="text" id="reg-code" required maxlength="6" class="w-full border-slate-300 rounded-lg shadow-sm focus:border-blue-500 focus:ring-blue-500 p-3 border bg-slate-50 tracking-widest text-center" data-i18n-placeholder="codePlaceholder">
-                <button type="button" id="send-code-btn" class="w-32 whitespace-nowrap px-4 py-3 font-semibold text-sm bg-slate-100 text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-200 transition-colors">
+            <label class="field-label" data-i18n="emailLabel">Email Address</label>
+            <input type="email" id="reg-email" required class="field-input">
+        </div>
+
+        <div>
+            <label class="field-label" data-i18n="captchaLabel">Email Verification Code</label>
+            <div class="field-row">
+                <input type="text" id="reg-code" required maxlength="6" class="field-input code-input" data-i18n-placeholder="codePlaceholder">
+                <button type="button" id="send-code-btn" class="btn btn-secondary send-code-btn">
                     <span data-i18n="sendCodeBtn">Send Code</span>
                 </button>
             </div>
         </div>
 
         <div>
-            <label class="block text-sm font-semibold text-slate-700 mb-2" data-i18n="passwordLabel">Password (Min 6 chars)</label>
-            <input type="password" id="reg-password" required minlength="6" class="w-full border-slate-300 rounded-lg shadow-sm focus:border-blue-500 focus:ring-blue-500 p-3 border bg-slate-50">
+            <label class="field-label" data-i18n="passwordLabel">Password (Min 6 chars)</label>
+            <input type="password" id="reg-password" required minlength="6" class="field-input">
         </div>
 
-        <button type="submit" id="reg-btn" class="w-full bg-blue-600 text-white font-bold py-3.5 px-4 rounded-lg hover:bg-blue-700 transition duration-200 shadow-md">
+        <button type="submit" id="reg-btn" class="btn btn-primary btn-lg btn-block">
             <span data-i18n="navRegister">Sign Up</span>
         </button>
     </form>
-    
-    <div id="reg-status" class="hidden mt-4 p-3 rounded-lg text-center text-sm font-medium"></div>
 
-    <p class="mt-8 text-center text-sm text-slate-500">
-        <span data-i18n="hasAccountMsg">Already have an account?</span> 
-        <a href="/login" class="text-blue-600 hover:underline font-semibold" data-i18n="navLogin">Login</a>
+    <div id="reg-status" class="status-msg hidden"></div>
+
+    <p class="panel-foot">
+        <span data-i18n="hasAccountMsg">Already have an account?</span>
+        <a href="/login" class="text-link" data-i18n="navLogin">Login</a>
     </p>
 </div>
 {% endblock %}
