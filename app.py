@@ -1,8 +1,9 @@
-from flask import Flask, render_template, request, jsonify, session, redirect, url_for
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for, send_from_directory, abort
 from datetime import datetime
 import sqlite3
 import json
 import re
+import uuid
 import random
 import os
 import smtplib
@@ -22,6 +23,18 @@ NETEASE_EMAIL = os.environ.get('NETEASE_EMAIL')
 NETEASE_PASSWORD = os.environ.get('NETEASE_PASSWORD')
 
 DB_PATH = '/home/xotd.db' if 'WEBSITE_SITE_NAME' in os.environ else 'xotd.db'
+
+# ==== 附件上传配置 ====
+# Azure 上只有 /home 是持久化存储,本地则放在项目目录下的 uploads/
+UPLOAD_DIR = '/home/uploads' if 'WEBSITE_SITE_NAME' in os.environ else os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), 'uploads')
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+ALLOWED_IMAGE_EXT = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+ALLOWED_DOC_EXT = {'md', 'txt', 'pdf'}
+STORED_NAME_RE = re.compile(r'^[a-f0-9]{32}\.[a-z0-9]{1,8}$')  # uuid.hex + 扩展名
+
+app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 单次请求上限 10 MB
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -52,6 +65,19 @@ def init_db():
             reference_urls TEXT,
             author TEXT DEFAULT '匿名用户',
             user_id INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS attachments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            item_id INTEGER,
+            user_id INTEGER,
+            stored_name TEXT UNIQUE NOT NULL,
+            original_name TEXT NOT NULL,
+            ext TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            file_size INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
@@ -86,6 +112,38 @@ def format_bilingual(row):
         item['def_zh'] = item['translated_definition'] or item['definition']
     return item
 
+def load_attachments(conn, items):
+    """为 items 批量挂载附件,拆出 images / docs 两类"""
+    for item in items:
+        item['attachments'] = []
+        item['images'] = []
+        item['docs'] = []
+    if not items:
+        return
+    ids = [item['id'] for item in items]
+    placeholders = ','.join('?' * len(ids))
+    rows = conn.execute(
+        f"SELECT * FROM attachments WHERE item_id IN ({placeholders}) ORDER BY id", ids
+    ).fetchall()
+    by_item = {}
+    for row in rows:
+        by_item.setdefault(row['item_id'], []).append(dict(row))
+    for item in items:
+        atts = by_item.get(item['id'], [])
+        item['attachments'] = atts
+        item['images'] = [a for a in atts if a['kind'] == 'image']
+        item['docs'] = [a for a in atts if a['kind'] == 'doc']
+
+def format_file_size(num):
+    if num is None:
+        return ''
+    num = float(num)
+    for unit in ('B', 'KB', 'MB'):
+        if num < 1024:
+            return f"{num:.0f} {unit}" if unit == 'B' else f"{num:.1f} {unit}"
+        num /= 1024
+    return f"{num:.1f} GB"
+
 def translate_text(item_name, definition):
     translated_item = ""
     translated_definition = ""
@@ -116,15 +174,15 @@ def index():
     conn = get_db_connection()
     today_str = datetime.now().strftime('%Y-%m-%d')
     rows = conn.execute("SELECT * FROM items WHERE created_at LIKE ? ORDER BY created_at DESC", (f"{today_str}%",)).fetchall()
-    conn.close()
     today_items = [format_bilingual(row) for row in rows]
+    load_attachments(conn, today_items)
+    conn.close()
     return render_template('index.html', items=today_items, today_date=today_str)
 
 @app.route('/explore')
 def explore():
     conn = get_db_connection()
     rows = conn.execute("SELECT * FROM items ORDER BY created_at DESC").fetchall()
-    conn.close()
     items = []
     custom_types = set()
     for row in rows:
@@ -132,6 +190,8 @@ def explore():
         items.append(item)
         if item['item_type'] not in ['word', 'concept']:
             custom_types.add(item['item_type'])
+    load_attachments(conn, items)
+    conn.close()
     return render_template('explore.html', items=items, custom_types=list(custom_types))
 
 @app.route('/login')
@@ -158,10 +218,13 @@ def edit_page(item_id):
         return redirect(url_for('index'))
     conn = get_db_connection()
     row = conn.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
-    conn.close()
     if not row:
+        conn.close()
         return redirect(url_for('index'))
-    return render_template('submit.html', item=format_bilingual(row))
+    item = format_bilingual(row)
+    load_attachments(conn, [item])
+    conn.close()
+    return render_template('submit.html', item=item)
 
 
 # ==== API 接口路由 ====
@@ -284,10 +347,19 @@ def submit():
 
     try:
         conn = get_db_connection()
-        conn.execute('''
+        cursor = conn.execute('''
             INSERT INTO items (item_type, item_name, translated_item, definition, translated_definition, example, reference_urls, author, user_id)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (item_type, item_name, translated_item, definition, translated_definition, example, urls_json, author, user_id))
+        item_id = cursor.lastrowid
+        # 把本次上传的待挂载附件绑定到新条目(只能绑自己的、尚未挂载的)
+        att_ids = [a for a in (data.get('attachment_ids') or []) if isinstance(a, int)]
+        if att_ids:
+            placeholders = ','.join('?' * len(att_ids))
+            conn.execute(
+                f"UPDATE attachments SET item_id = ? WHERE id IN ({placeholders}) AND user_id = ? AND item_id IS NULL",
+                [item_id, *att_ids, user_id]
+            )
         conn.commit()
         conn.close()
         return jsonify({"message": "Success"}), 201
@@ -310,10 +382,18 @@ def api_edit(item_id):
     try:
         conn = get_db_connection()
         conn.execute('''
-            UPDATE items 
+            UPDATE items
             SET item_type=?, item_name=?, translated_item=?, definition=?, translated_definition=?, example=?, reference_urls=?
             WHERE id=?
         ''', (item_type, item_name, translated_item, definition, translated_definition, example, urls_json, item_id))
+        # 编辑时新上传的附件同样挂载到该条目
+        att_ids = [a for a in (data.get('attachment_ids') or []) if isinstance(a, int)]
+        if att_ids:
+            placeholders = ','.join('?' * len(att_ids))
+            conn.execute(
+                f"UPDATE attachments SET item_id = ? WHERE id IN ({placeholders}) AND user_id = ? AND item_id IS NULL",
+                [item_id, *att_ids, session['user_id']]
+            )
         conn.commit()
         conn.close()
         return jsonify({"message": "Updated successfully"}), 200
@@ -327,12 +407,112 @@ def delete_item(item_id):
         return jsonify({"error": "Admin access required"}), 403
     try:
         conn = get_db_connection()
+        # 一并清理该条目的附件(数据库记录 + 磁盘文件)
+        rows = conn.execute('SELECT stored_name FROM attachments WHERE item_id = ?', (item_id,)).fetchall()
+        for row in rows:
+            try:
+                os.remove(os.path.join(UPLOAD_DIR, row['stored_name']))
+            except OSError:
+                pass
+        conn.execute('DELETE FROM attachments WHERE item_id = ?', (item_id,))
         conn.execute('DELETE FROM items WHERE id = ?', (item_id,))
         conn.commit()
         conn.close()
         return jsonify({"message": "Deleted successfully"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+# ==== 附件:上传 / 文件服务 / 在线查看 ====
+
+@app.errorhandler(413)
+def file_too_large(e):
+    return jsonify({"error": "File too large (max 10 MB)"}), 413
+
+@app.route('/api/upload', methods=['POST'])
+@login_required
+def api_upload():
+    file = request.files.get('file')
+    if not file or not file.filename:
+        return jsonify({"error": "No file provided"}), 400
+
+    original_name = file.filename
+    ext = original_name.rsplit('.', 1)[-1].lower() if '.' in original_name else ''
+    if ext in ALLOWED_IMAGE_EXT:
+        kind = 'image'
+    elif ext in ALLOWED_DOC_EXT:
+        kind = 'doc'
+    else:
+        return jsonify({"error": f"File type .{ext or '?'} is not allowed"}), 400
+
+    # 用 uuid 重命名存储,原始文件名只存数据库,杜绝路径注入
+    stored_name = uuid.uuid4().hex + '.' + ext
+    save_path = os.path.join(UPLOAD_DIR, stored_name)
+    file.save(save_path)
+    file_size = os.path.getsize(save_path)
+
+    conn = get_db_connection()
+    cursor = conn.execute('''
+        INSERT INTO attachments (user_id, stored_name, original_name, ext, kind, file_size)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (session['user_id'], stored_name, original_name, ext, kind, file_size))
+    conn.commit()
+    att_id = cursor.lastrowid
+    conn.close()
+
+    return jsonify({
+        "id": att_id,
+        "url": f"/files/{stored_name}",
+        "view_url": f"/view/{att_id}",
+        "name": original_name,
+        "kind": kind
+    }), 201
+
+@app.route('/files/<stored_name>')
+def serve_file(stored_name):
+    if not STORED_NAME_RE.match(stored_name):
+        abort(404)
+    ext = stored_name.rsplit('.', 1)[-1]
+    # md/txt 强制纯文本输出,供查看页 fetch,且绝不会被当作 HTML 解析(Flask 会自动补 charset)
+    mimetype = 'text/plain' if ext in ('md', 'txt') else None
+    response = send_from_directory(UPLOAD_DIR, stored_name, mimetype=mimetype)
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    return response
+
+@app.route('/view/<int:attachment_id>')
+def view_attachment(attachment_id):
+    conn = get_db_connection()
+    row = conn.execute('SELECT * FROM attachments WHERE id = ?', (attachment_id,)).fetchone()
+    conn.close()
+    if not row:
+        return redirect(url_for('index'))
+    att = dict(row)
+    att['url'] = f"/files/{att['stored_name']}"
+    att['size_label'] = format_file_size(att['file_size'])
+    att['date_only'] = (att['created_at'] or '').split(' ')[0]
+    return render_template('viewer.html', att=att)
+
+@app.route('/api/attachment/<int:att_id>', methods=['DELETE'])
+@login_required
+def delete_attachment(att_id):
+    conn = get_db_connection()
+    row = conn.execute('SELECT * FROM attachments WHERE id = ?', (att_id,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({"error": "Not found"}), 404
+    # 管理员可删任意附件;普通用户只能删自己尚未挂载到条目的附件
+    is_admin = session.get('username') == 'TROYCE'
+    is_owner_pending = (row['user_id'] == session['user_id'] and row['item_id'] is None)
+    if not (is_admin or is_owner_pending):
+        conn.close()
+        return jsonify({"error": "Permission denied"}), 403
+    try:
+        os.remove(os.path.join(UPLOAD_DIR, row['stored_name']))
+    except OSError:
+        pass
+    conn.execute('DELETE FROM attachments WHERE id = ?', (att_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "Deleted"}), 200
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
