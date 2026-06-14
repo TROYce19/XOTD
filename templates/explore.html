@@ -89,7 +89,21 @@
         {% endif %}
 
         <div class="card-footer">
-            <span data-i18n="contributor">By</span>: <strong>{{ item.author }}</strong>
+            {% if item.author_link %}
+            <a href="/user/{{ item.author_link }}" class="author">
+                {% if item.author_avatar %}
+                <img class="author-avatar" src="/files/{{ item.author_avatar }}" alt="">
+                {% else %}
+                <span class="author-avatar author-avatar-fallback">{{ item.author[:1]|upper }}</span>
+                {% endif %}
+                <span class="author-name">{{ item.author }}</span>
+            </a>
+            {% else %}
+            <span class="author author-static">
+                <span class="author-avatar author-avatar-fallback">{{ item.author[:1]|upper }}</span>
+                <span class="author-name">{{ item.author }}</span>
+            </span>
+            {% endif %}
         </div>
     </article>
     {% else %}

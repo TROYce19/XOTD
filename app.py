@@ -33,6 +33,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 ALLOWED_IMAGE_EXT = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 ALLOWED_DOC_EXT = {'md', 'txt', 'pdf'}
 STORED_NAME_RE = re.compile(r'^[a-f0-9]{32}\.[a-z0-9]{1,8}$')  # uuid.hex + 扩展名
+ANON_NAMES = {'Anonymous', '匿名用户'}  # 匿名署名:绝不关联真实用户身份
 
 app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 单次请求上限 10 MB
 
@@ -48,11 +49,16 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-    try:
-        cursor.execute("ALTER TABLE users ADD COLUMN email TEXT")
-    except sqlite3.OperationalError:
-        pass  # 列已存在，忽略
-        
+    # 旧库无损升级:逐列尝试添加,已存在则忽略
+    for ddl in (
+        "ALTER TABLE users ADD COLUMN email TEXT",
+        "ALTER TABLE users ADD COLUMN avatar TEXT",
+    ):
+        try:
+            cursor.execute(ddl)
+        except sqlite3.OperationalError:
+            pass  # 列已存在，忽略
+
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -134,6 +140,31 @@ def load_attachments(conn, items):
         item['images'] = [a for a in atts if a['kind'] == 'image']
         item['docs'] = [a for a in atts if a['kind'] == 'doc']
 
+def attach_author_avatars(conn, items):
+    """为 items 批量挂上作者头像与主页链接。
+    匿名词条(author 在 ANON_NAMES 中)不暴露其 user_id 对应的真实身份。"""
+    ids = list({
+        item['user_id'] for item in items
+        if item.get('user_id') and item.get('author') not in ANON_NAMES
+    })
+    user_map = {}
+    if ids:
+        placeholders = ','.join('?' * len(ids))
+        rows = conn.execute(
+            f"SELECT id, username, avatar FROM users WHERE id IN ({placeholders})", ids
+        ).fetchall()
+        user_map = {r['id']: r for r in rows}
+    for item in items:
+        item['author_avatar'] = None
+        item['author_link'] = None
+        if item.get('author') in ANON_NAMES:
+            continue
+        u = user_map.get(item.get('user_id'))
+        # 仅当存储的署名与该用户当前用户名一致时才链接,避免改名/历史数据错配
+        if u and u['username'] == item.get('author'):
+            item['author_avatar'] = u['avatar']
+            item['author_link'] = u['username']
+
 def format_file_size(num):
     if num is None:
         return ''
@@ -168,6 +199,22 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
+@app.context_processor
+def inject_current_user():
+    """把当前登录用户的头像注入所有模板(nav 用)。
+    session 里有则走快路径,否则懒加载一次并缓存,兼容头像功能上线前的旧会话。"""
+    avatar = None
+    if session.get('user_id'):
+        if 'avatar' in session:
+            avatar = session['avatar']
+        else:
+            conn = get_db_connection()
+            row = conn.execute('SELECT avatar FROM users WHERE id = ?', (session['user_id'],)).fetchone()
+            conn.close()
+            avatar = row['avatar'] if row else None
+            session['avatar'] = avatar
+    return {'current_avatar': avatar}
+
 # ==== 页面路由 ====
 @app.route('/')
 def index():
@@ -176,6 +223,7 @@ def index():
     rows = conn.execute("SELECT * FROM items WHERE created_at LIKE ? ORDER BY created_at DESC", (f"{today_str}%",)).fetchall()
     today_items = [format_bilingual(row) for row in rows]
     load_attachments(conn, today_items)
+    attach_author_avatars(conn, today_items)
     conn.close()
     return render_template('index.html', items=today_items, today_date=today_str)
 
@@ -191,6 +239,7 @@ def explore():
         if item['item_type'] not in ['word', 'concept']:
             custom_types.add(item['item_type'])
     load_attachments(conn, items)
+    attach_author_avatars(conn, items)
     conn.close()
     return render_template('explore.html', items=items, custom_types=list(custom_types))
 
@@ -225,6 +274,38 @@ def edit_page(item_id):
     load_attachments(conn, [item])
     conn.close()
     return render_template('submit.html', item=item)
+
+@app.route('/user/<username>')
+def user_profile(username):
+    conn = get_db_connection()
+    user = conn.execute(
+        'SELECT id, username, avatar, created_at FROM users WHERE username = ?', (username,)
+    ).fetchone()
+    if not user:
+        conn.close()
+        return render_template('user.html', profile=None, items=[]), 404
+    # 只展示该用户实名发布的词条(匿名词条不计入公开主页)
+    rows = conn.execute(
+        "SELECT * FROM items WHERE user_id = ? AND author = ? ORDER BY created_at DESC",
+        (user['id'], username)
+    ).fetchall()
+    items = [format_bilingual(r) for r in rows]
+    load_attachments(conn, items)
+    attach_author_avatars(conn, items)
+    conn.close()
+    profile = dict(user)
+    profile['join_date'] = (user['created_at'] or '').split(' ')[0]
+    profile['item_count'] = len(items)
+    profile['is_self'] = (session.get('user_id') == user['id'])
+    return render_template('user.html', profile=profile, items=items)
+
+@app.route('/settings')
+@login_required
+def settings_page():
+    conn = get_db_connection()
+    row = conn.execute('SELECT avatar FROM users WHERE id = ?', (session['user_id'],)).fetchone()
+    conn.close()
+    return render_template('settings.html', avatar=row['avatar'] if row else None)
 
 
 # ==== API 接口路由 ====
@@ -293,6 +374,7 @@ def api_register():
         conn.commit()
         session['user_id'] = cursor.lastrowid
         session['username'] = username
+        session['avatar'] = None
         session.pop('email_code', None)
         session.pop('reg_email', None)
         conn.close()
@@ -316,6 +398,7 @@ def api_login():
     if user and check_password_hash(user['password_hash'], password):
         session['user_id'] = user['id']
         session['username'] = user['username']
+        session['avatar'] = user['avatar'] if 'avatar' in user.keys() else None
         return jsonify({"message": "Login successful"}), 200
     else:
         return jsonify({"error": "Invalid username or password"}), 401
@@ -513,6 +596,55 @@ def delete_attachment(att_id):
     conn.commit()
     conn.close()
     return jsonify({"message": "Deleted"}), 200
+
+# ==== 用户头像 ====
+
+def _remove_upload(stored_name):
+    """安全删除上传目录下的文件(校验文件名格式)"""
+    if stored_name and STORED_NAME_RE.match(stored_name):
+        try:
+            os.remove(os.path.join(UPLOAD_DIR, stored_name))
+        except OSError:
+            pass
+
+@app.route('/api/avatar', methods=['POST'])
+@login_required
+def api_set_avatar():
+    file = request.files.get('avatar')
+    if not file or not file.filename:
+        return jsonify({"error": "No file provided"}), 400
+
+    ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
+    if ext not in ALLOWED_IMAGE_EXT:
+        return jsonify({"error": "Avatar must be an image (png/jpg/jpeg/gif/webp)"}), 400
+
+    stored_name = uuid.uuid4().hex + '.' + ext
+    file.save(os.path.join(UPLOAD_DIR, stored_name))
+
+    conn = get_db_connection()
+    old = conn.execute('SELECT avatar FROM users WHERE id = ?', (session['user_id'],)).fetchone()
+    conn.execute('UPDATE users SET avatar = ? WHERE id = ?', (stored_name, session['user_id']))
+    conn.commit()
+    conn.close()
+
+    if old and old['avatar'] and old['avatar'] != stored_name:
+        _remove_upload(old['avatar'])  # 清理旧头像文件
+    session['avatar'] = stored_name
+
+    return jsonify({"avatar_url": f"/files/{stored_name}"}), 200
+
+@app.route('/api/avatar', methods=['DELETE'])
+@login_required
+def api_remove_avatar():
+    conn = get_db_connection()
+    old = conn.execute('SELECT avatar FROM users WHERE id = ?', (session['user_id'],)).fetchone()
+    conn.execute('UPDATE users SET avatar = NULL WHERE id = ?', (session['user_id'],))
+    conn.commit()
+    conn.close()
+    if old and old['avatar']:
+        _remove_upload(old['avatar'])
+    session['avatar'] = None
+    return jsonify({"message": "Avatar removed"}), 200
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

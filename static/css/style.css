@@ -1477,3 +1477,165 @@ a.file-name:hover { color: var(--accent); }
     .viewer-head { align-items: flex-start; flex-direction: column; }
     .file-chip-name { max-width: 110px; }
 }
+
+/* ====== 19. Avatars & User Profiles ====== */
+
+/* —— 导航栏头像(图片变体,复用 .user-avatar 尺寸) —— */
+.user-avatar-img {
+    object-fit: cover;
+    padding: 0;
+    background: var(--surface-2);
+}
+a.user-chip {
+    transition: transform var(--dur-fast) var(--ease),
+        border-color var(--dur-fast) ease,
+        box-shadow var(--dur-fast) ease;
+}
+a.user-chip:hover {
+    transform: translateY(-1px);
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-2);
+}
+
+/* —— 卡片作者署名 —— */
+.author {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    max-width: 100%;
+}
+.author-static { color: var(--text-3); }
+a.author { transition: color var(--dur-fast) ease; }
+a.author:hover { color: var(--text-1); }
+a.author:hover .author-name { color: var(--accent); }
+
+.author-avatar {
+    width: 24px; height: 24px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+}
+.author-avatar-fallback {
+    display: inline-grid;
+    place-items: center;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: var(--text-micro);
+    font-weight: 700;
+    border-color: transparent;
+}
+.author-name {
+    font-size: var(--text-caption);
+    font-weight: 600;
+    color: var(--text-2);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: color var(--dur-fast) ease;
+}
+
+/* —— 用户主页头部 —— */
+.profile-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-6);
+    max-width: var(--grid-max);
+    margin: var(--space-12) auto var(--space-10);
+    padding-bottom: var(--space-8);
+    border-bottom: 1px solid var(--border);
+}
+
+.profile-avatar {
+    width: 96px; height: 96px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-2);
+    background: var(--surface-2);
+}
+.profile-avatar-fallback {
+    display: grid;
+    place-items: center;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-family: var(--font-serif);
+    font-size: 2.25rem;
+    font-weight: 700;
+}
+
+.profile-name {
+    font-family: var(--font-serif);
+    font-weight: 700;
+    font-size: var(--text-h1);
+    line-height: 1.2;
+    word-break: break-word;
+}
+
+.profile-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+    margin-top: var(--space-2);
+    font-size: var(--text-sm);
+    color: var(--text-3);
+    font-variant-numeric: tabular-nums;
+}
+
+.profile-edit-btn { margin-top: var(--space-4); }
+
+/* —— 设置页头像设置区 —— */
+.avatar-setter {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-5);
+}
+
+.avatar-preview-wrap {
+    width: 128px; height: 128px;
+    position: relative;
+}
+.avatar-preview {
+    width: 128px; height: 128px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-2);
+    background: var(--surface-2);
+}
+.avatar-preview-fallback {
+    display: grid;
+    place-items: center;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-family: var(--font-serif);
+    font-size: 3rem;
+    font-weight: 700;
+}
+
+.avatar-actions {
+    display: flex;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.avatar-hint {
+    font-size: var(--text-caption);
+    color: var(--text-3);
+    text-align: center;
+}
+
+@media (max-width: 480px) {
+    .profile-head {
+        flex-direction: column;
+        text-align: center;
+        gap: var(--space-4);
+    }
+    .profile-meta { justify-content: center; }
+    .profile-avatar { width: 80px; height: 80px; }
+}

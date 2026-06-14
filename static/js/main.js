@@ -39,6 +39,24 @@ const translations = {
         backLink: "Back",
         downloadBtn: "Download",
         viewerLoading: "Loading…",
+        navProfile: "My Profile",
+        navSettings: "Settings",
+        settingsTitle: "Settings",
+        settingsSub: "Manage your profile avatar.",
+        avatarUpload: "Upload image",
+        avatarRemove: "Remove",
+        avatarHint: "PNG · JPG · GIF · WEBP, up to 10 MB.",
+        avatarUploading: "Uploading…",
+        avatarFailed: "Upload failed",
+        avatarSaved: "Avatar updated",
+        avatarRemoved: "Avatar removed",
+        profileContributions: "contributions",
+        profileJoined: "Joined",
+        profileEdit: "Edit profile",
+        profileNoItems: "No public contributions yet.",
+        profileView: "View my profile",
+        userNotFound: "User not found",
+        userNotFoundSub: "This user doesn't exist or has been removed.",
         wordTitle: "Word of the Day",
         conceptTitle: "Concept of the Day",
         exploreTitle: "Explore Past XOTDs",
@@ -112,6 +130,24 @@ const translations = {
         backLink: "返回",
         downloadBtn: "下载",
         viewerLoading: "加载中…",
+        navProfile: "我的主页",
+        navSettings: "设置",
+        settingsTitle: "设置",
+        settingsSub: "管理你的头像。",
+        avatarUpload: "上传图片",
+        avatarRemove: "移除",
+        avatarHint: "PNG · JPG · GIF · WEBP,最大 10 MB。",
+        avatarUploading: "上传中…",
+        avatarFailed: "上传失败",
+        avatarSaved: "头像已更新",
+        avatarRemoved: "头像已移除",
+        profileContributions: "条贡献",
+        profileJoined: "加入于",
+        profileEdit: "编辑资料",
+        profileNoItems: "还没有公开的贡献。",
+        profileView: "查看我的主页",
+        userNotFound: "用户不存在",
+        userNotFoundSub: "该用户不存在或已被移除。",
         wordTitle: "今日单词",
         conceptTitle: "今日概念",
         exploreTitle: "探索往期 XOTD",
@@ -165,6 +201,13 @@ function updateLanguage(lang) {
         const key = el.getAttribute('data-i18n-placeholder');
         if (translations[lang][key]) {
             el.placeholder = translations[lang][key];
+        }
+    });
+
+    document.querySelectorAll('[data-i18n-title]').forEach(el => {
+        const key = el.getAttribute('data-i18n-title');
+        if (translations[lang][key]) {
+            el.title = translations[lang][key];
         }
     });
 
@@ -486,6 +529,12 @@ function applyAllFilters() {
 
 if (searchInput) {
     searchInput.addEventListener('input', applyAllFilters);
+    // 支持 /explore?q=keyword 深链(如从作者名跳转预填搜索)
+    const qParam = new URLSearchParams(window.location.search).get('q');
+    if (qParam) {
+        searchInput.value = qParam;
+        applyAllFilters();
+    }
 }
 
 if (datePicker) {
@@ -562,18 +611,21 @@ if (themeToggleBtn) {
 // ==== 数字滚动动画 ====
 document.querySelectorAll('[data-countup]').forEach(el => {
     const target = parseInt(el.textContent.replace(/\D/g, ''), 10) || 0;
-    if (PREFERS_REDUCED_MOTION || target === 0) {
+    // 不动画时(含后台标签页 rAF 被节流的情况)直接落定到目标值,
+    // 把首帧写入也放进 rAF:这样若 rAF 永不触发,元素会保留服务端渲染的真实数字而非停在 0
+    if (PREFERS_REDUCED_MOTION || target === 0 || document.hidden) {
         el.textContent = target;
         return;
     }
     const duration = 900;
-    const start = performance.now();
-    (function tick(now) {
-        const p = Math.min((now - start) / duration, 1);
-        const eased = 1 - Math.pow(1 - p, 3);
-        el.textContent = Math.round(target * eased);
-        if (p < 1) requestAnimationFrame(tick);
-    })(start);
+    let startTs = null;
+    function step(ts) {
+        if (startTs === null) startTs = ts;
+        const p = Math.min((ts - startTs) / duration, 1);
+        el.textContent = Math.round(target * (1 - Math.pow(1 - p, 3)));
+        if (p < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
 });
 
 // ==== 页面顶部阅读进度条 ====
@@ -744,6 +796,101 @@ if (existingFilesEl) {
         }
     });
 }
+
+// ==== 设置页:头像上传 / 移除 ====
+(function initAvatarSettings() {
+    const input = document.getElementById('avatar-input');
+    const uploadBtn = document.getElementById('avatar-upload-btn');
+    const removeBtn = document.getElementById('avatar-remove-btn');
+    const preview = document.getElementById('avatar-preview');
+    const fallback = document.getElementById('avatar-fallback');
+    const statusEl = document.getElementById('avatar-status');
+    if (!input || !uploadBtn) return;
+
+    const AVATAR_MAX = 10 * 1024 * 1024;
+    const AVATAR_EXT = ['png', 'jpg', 'jpeg', 'gif', 'webp'];
+
+    function setStatus(msg, ok) {
+        statusEl.className = 'status-msg ' + (ok ? 'is-success' : 'is-error');
+        statusEl.textContent = msg;
+    }
+
+    // 同步导航栏头像,免刷新即时生效
+    function syncNavAvatar(url) {
+        const chip = document.querySelector('.nav-user .user-chip');
+        if (!chip) return;
+        const existing = chip.querySelector('.user-avatar');
+        if (url) {
+            if (existing && existing.tagName === 'IMG') {
+                existing.src = url;
+            } else if (existing) {
+                const img = document.createElement('img');
+                img.className = 'user-avatar user-avatar-img';
+                img.src = url;
+                existing.replaceWith(img);
+            }
+        }
+    }
+
+    uploadBtn.addEventListener('click', () => input.click());
+
+    input.addEventListener('change', async () => {
+        const file = input.files && input.files[0];
+        input.value = '';
+        if (!file) return;
+
+        const ext = file.name.includes('.') ? file.name.split('.').pop().toLowerCase() : '';
+        if (!AVATAR_EXT.includes(ext)) { setStatus(translations[currentLang].fileTypeBad, false); return; }
+        if (file.size > AVATAR_MAX) { setStatus(translations[currentLang].fileTooBig, false); return; }
+
+        uploadBtn.disabled = true;
+        setStatus(translations[currentLang].avatarUploading, true);
+        try {
+            const formData = new FormData();
+            formData.append('avatar', file);
+            const response = await fetch('/api/avatar', { method: 'POST', body: formData });
+            const data = await safeParseJSON(response);
+            if (!response.ok) throw new Error(data.error || 'Upload failed');
+            preview.src = data.avatar_url;
+            preview.classList.remove('hidden');
+            if (fallback) fallback.classList.add('hidden');
+            removeBtn.classList.remove('hidden');
+            syncNavAvatar(data.avatar_url);
+            setStatus(translations[currentLang].avatarSaved, true);
+        } catch (err) {
+            setStatus(translations[currentLang].avatarFailed + (err.message ? `: ${err.message}` : ''), false);
+        } finally {
+            uploadBtn.disabled = false;
+        }
+    });
+
+    if (removeBtn) {
+        removeBtn.addEventListener('click', async () => {
+            removeBtn.disabled = true;
+            try {
+                const response = await fetch('/api/avatar', { method: 'DELETE' });
+                if (!response.ok) throw new Error();
+                preview.classList.add('hidden');
+                preview.removeAttribute('src');
+                if (fallback) fallback.classList.remove('hidden');
+                removeBtn.classList.add('hidden');
+                // 导航栏头像还原为首字母
+                const chip = document.querySelector('.nav-user .user-chip .user-avatar');
+                if (chip && chip.tagName === 'IMG' && fallback) {
+                    const span = document.createElement('span');
+                    span.className = 'user-avatar';
+                    span.textContent = fallback.textContent.trim();
+                    chip.replaceWith(span);
+                }
+                setStatus(translations[currentLang].avatarRemoved, true);
+            } catch (err) {
+                setStatus(translations[currentLang].avatarFailed, false);
+            } finally {
+                removeBtn.disabled = false;
+            }
+        });
+    }
+})();
 
 // ==== 移动端折叠菜单 ====
 (function initMobileNav() {

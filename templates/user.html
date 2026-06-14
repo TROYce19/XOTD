@@ -1,17 +1,29 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<header class="hero">
-    <p class="hero-kicker" data-reveal data-i18n="todayHighlights">Today's Highlights</p>
-    <h1 class="hero-title" data-reveal data-i18n="title">XOTD</h1>
-    <p class="hero-sub" data-reveal data-i18n="subtitle">Learn, discover, and share knowledge with the world, one day at a time.</p>
+{% if not profile %}
+<div class="page-head" data-reveal>
+    <h1 data-i18n="userNotFound">User not found</h1>
+    <p data-i18n="userNotFoundSub">This user doesn't exist or has been removed.</p>
+    <a href="/explore" class="btn btn-secondary btn-lg" style="margin-top: var(--space-5);" data-i18n="navExplore">Explore</a>
+</div>
+{% else %}
+<header class="profile-head" data-reveal>
+    {% if profile.avatar %}
+    <img class="profile-avatar" src="/files/{{ profile.avatar }}" alt="{{ profile.username }}">
+    {% else %}
+    <span class="profile-avatar profile-avatar-fallback">{{ profile.username[:1]|upper }}</span>
+    {% endif %}
 
-    <div class="hero-meta" data-reveal>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="3"></rect><path d="M16 2v4M8 2v4M3 10h18"></path></svg>
-        <span class="hero-date">{{ today_date }}</span>
-        {% if items %}
-        <span class="dot-sep"></span>
-        <span><span class="stat-num" data-countup>{{ items|length }}</span> <span data-i18n="todayCount">shared today</span></span>
+    <div class="profile-info">
+        <h1 class="profile-name">{{ profile.username }}</h1>
+        <p class="profile-meta">
+            <span><span class="stat-num" data-countup>{{ profile.item_count }}</span> <span data-i18n="profileContributions">contributions</span></span>
+            <span class="dot-sep"></span>
+            <span><span data-i18n="profileJoined">Joined</span> {{ profile.join_date }}</span>
+        </p>
+        {% if profile.is_self %}
+        <a href="/settings" class="btn btn-secondary profile-edit-btn" data-i18n="profileEdit">Edit profile</a>
         {% endif %}
     </div>
 </header>
@@ -40,32 +52,17 @@
 
         <div class="card-head">
             <span class="type-badge"><span class="type-dot"></span>{{ item.item_type }}</span>
-            <span class="card-date" data-i18n="todayLabel">Today</span>
+            <span class="card-date">{{ item.date_only }}</span>
         </div>
 
         <h3 class="card-title">
             <span class="bilingual-text" data-lang="en">{{ item.name_en }}</span>
             <span class="bilingual-text hidden" data-lang="zh">{{ item.name_zh }}</span>
         </h3>
-        <p class="card-def">
+        <p class="card-def clamp-3">
             <span class="bilingual-text" data-lang="en">{{ item.def_en }}</span>
             <span class="bilingual-text hidden" data-lang="zh">{{ item.def_zh }}</span>
         </p>
-
-        {% if item.example %}
-        <blockquote class="card-example">“{{ item.example }}”</blockquote>
-        {% endif %}
-
-        {% if item.urls %}
-        <div class="ref-row">
-            {% for url in item.urls %}
-            <a href="{{ url }}" target="_blank" rel="noopener" class="ref-chip">
-                <span data-i18n="readMore">Ref</span>
-                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"></path></svg>
-            </a>
-            {% endfor %}
-        </div>
-        {% endif %}
 
         {% if item.docs or item.images|length > 1 %}
         <div class="ref-row">
@@ -82,28 +79,14 @@
         {% endif %}
 
         <div class="card-footer">
-            {% if item.author_link %}
-            <a href="/user/{{ item.author_link }}" class="author">
-                {% if item.author_avatar %}
-                <img class="author-avatar" src="/files/{{ item.author_avatar }}" alt="">
-                {% else %}
-                <span class="author-avatar author-avatar-fallback">{{ item.author[:1]|upper }}</span>
-                {% endif %}
-                <span class="author-name">{{ item.author }}</span>
-            </a>
-            {% else %}
-            <span class="author author-static">
-                <span class="author-avatar author-avatar-fallback">{{ item.author[:1]|upper }}</span>
-                <span class="author-name">{{ item.author }}</span>
-            </span>
-            {% endif %}
+            <span class="card-date">{{ item.date_only }}</span>
         </div>
     </article>
     {% else %}
     <div class="empty-state" data-reveal>
-        <p data-i18n="noDataToday">No one has shared anything today yet.</p>
-        <a href="/submit-page" class="btn btn-primary btn-lg" data-i18n="navSubmit">Submit</a>
+        <p data-i18n="profileNoItems">No public contributions yet.</p>
     </div>
     {% endfor %}
 </div>
+{% endif %}
 {% endblock %}
