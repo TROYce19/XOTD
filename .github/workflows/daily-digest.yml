@@ -1,0 +1,27 @@
+name: Daily XOTD digest
+
+# 每天定时调用受保护的 /cron/daily-digest 接口,给订阅用户发送当日精选。
+# 需要在仓库 Secrets 配置 CRON_SECRET(与 Web App 的 CRON_SECRET 环境变量一致)。
+# 如站点域名不同,改下面的 URL,或配置 SITE_BASE_URL secret。
+
+on:
+  schedule:
+    # 14:00 UTC = 22:00 北京时间,确保覆盖当天的贡献
+    - cron: '0 14 * * *'
+  workflow_dispatch: {}
+
+jobs:
+  send-digest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger daily digest
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          BASE_URL: ${{ secrets.SITE_BASE_URL }}
+        run: |
+          BASE="${BASE_URL:-https://xotd.azurewebsites.net}"
+          if [ -z "$CRON_SECRET" ]; then
+            echo "CRON_SECRET secret is not set; skipping."
+            exit 0
+          fi
+          curl -fsS "$BASE/cron/daily-digest?key=$CRON_SECRET" && echo "Digest triggered."
