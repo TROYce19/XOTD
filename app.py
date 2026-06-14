@@ -1,11 +1,13 @@
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, send_from_directory, abort
-from datetime import datetime
+from datetime import datetime, timedelta
 import sqlite3
 import json
 import re
 import uuid
 import random
 import os
+import time
+import threading
 import smtplib
 from email.mime.text import MIMEText
 from functools import wraps
@@ -16,11 +18,21 @@ from dotenv import load_dotenv
 load_dotenv()  # 加载 .env 文件中的环境变量
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'xotd_dev_secret_key_2026')
+
+IS_PROD = 'WEBSITE_SITE_NAME' in os.environ
+_DEFAULT_SECRET = 'xotd_dev_secret_key_2026'
+app.secret_key = os.environ.get('SECRET_KEY', _DEFAULT_SECRET)
+if IS_PROD and app.secret_key == _DEFAULT_SECRET:
+    # 生产环境务必通过环境变量设置 SECRET_KEY,否则 session 可被伪造
+    print("WARNING: SECRET_KEY is using the insecure default in production. Set the SECRET_KEY env var.")
 
 # 这样写才是绝对安全的“无默认值”状态！
 NETEASE_EMAIL = os.environ.get('NETEASE_EMAIL')
 NETEASE_PASSWORD = os.environ.get('NETEASE_PASSWORD')
+# 每日邮件定时接口的保护密钥(未设置则该接口拒绝服务)
+CRON_SECRET = os.environ.get('CRON_SECRET')
+# 站点对外基础 URL(用于邮件里的链接),默认值可被环境变量覆盖
+SITE_URL = os.environ.get('SITE_URL', 'https://xotd.azurewebsites.net')
 
 DB_PATH = '/home/xotd.db' if 'WEBSITE_SITE_NAME' in os.environ else 'xotd.db'
 
@@ -49,16 +61,6 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-    # 旧库无损升级:逐列尝试添加,已存在则忽略
-    for ddl in (
-        "ALTER TABLE users ADD COLUMN email TEXT",
-        "ALTER TABLE users ADD COLUMN avatar TEXT",
-    ):
-        try:
-            cursor.execute(ddl)
-        except sqlite3.OperationalError:
-            pass  # 列已存在，忽略
-
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -69,11 +71,24 @@ def init_db():
             translated_definition TEXT,
             example TEXT,
             reference_urls TEXT,
+            tags TEXT,
             author TEXT DEFAULT '匿名用户',
             user_id INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    # 旧库无损升级:逐列尝试添加,已存在则忽略(表已在上方创建)
+    for ddl in (
+        "ALTER TABLE users ADD COLUMN email TEXT",
+        "ALTER TABLE users ADD COLUMN avatar TEXT",
+        "ALTER TABLE users ADD COLUMN email_subscribed INTEGER DEFAULT 0",
+        "ALTER TABLE items ADD COLUMN tags TEXT",
+    ):
+        try:
+            cursor.execute(ddl)
+        except sqlite3.OperationalError:
+            pass  # 列已存在，忽略
+
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS attachments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -85,6 +100,15 @@ def init_db():
             kind TEXT NOT NULL,
             file_size INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS likes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            item_id INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, item_id)
         )
     ''')
     conn.commit()
@@ -104,6 +128,7 @@ def format_bilingual(row):
     if not row: return None
     item = dict(row)
     item['urls'] = json.loads(item['reference_urls']) if item.get('reference_urls') else []
+    item['tag_list'] = json.loads(item['tags']) if item.get('tags') else []
     item['date_only'] = item['created_at'].split(' ')[0]
     
     if contains_chinese(item['item_name']):
@@ -165,6 +190,65 @@ def attach_author_avatars(conn, items):
             item['author_avatar'] = u['avatar']
             item['author_link'] = u['username']
 
+def attach_likes(conn, items):
+    """批量挂上点赞数与当前用户是否已赞。"""
+    for item in items:
+        item['like_count'] = 0
+        item['liked_by_me'] = False
+    if not items:
+        return
+    ids = [item['id'] for item in items]
+    ph = ','.join('?' * len(ids))
+    counts = conn.execute(
+        f"SELECT item_id, COUNT(*) c FROM likes WHERE item_id IN ({ph}) GROUP BY item_id", ids
+    ).fetchall()
+    cmap = {r['item_id']: r['c'] for r in counts}
+    mine = set()
+    uid = session.get('user_id')
+    if uid:
+        rows = conn.execute(
+            f"SELECT item_id FROM likes WHERE user_id = ? AND item_id IN ({ph})", [uid, *ids]
+        ).fetchall()
+        mine = {r['item_id'] for r in rows}
+    for item in items:
+        item['like_count'] = cmap.get(item['id'], 0)
+        item['liked_by_me'] = item['id'] in mine
+
+def query_items(conn, q='', type_='all', tag='', date='', page=1, per_page=12):
+    """统一的条目查询(搜索 + 筛选 + 分页),供 /explore 与 /api/items 复用。
+    返回 (enriched_items, has_more)。"""
+    where, params = [], []
+    if type_ and type_ != 'all':
+        if type_ == 'only-others':
+            where.append("item_type NOT IN ('word','concept')")
+        else:
+            where.append("item_type = ?")
+            params.append(type_)
+    if tag:
+        where.append("tags LIKE ?")
+        params.append(f'%"{tag}"%')
+    if date:
+        where.append("created_at LIKE ?")
+        params.append(f"{date}%")
+    if q:
+        like = f"%{q}%"
+        where.append("(item_name LIKE ? OR definition LIKE ? OR translated_item LIKE ? "
+                      "OR translated_definition LIKE ? OR author LIKE ? OR tags LIKE ?)")
+        params.extend([like] * 6)
+    where_sql = (' WHERE ' + ' AND '.join(where)) if where else ''
+    offset = (max(page, 1) - 1) * per_page
+    rows = conn.execute(
+        f"SELECT * FROM items{where_sql} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        [*params, per_page + 1, offset]
+    ).fetchall()
+    has_more = len(rows) > per_page
+    rows = rows[:per_page]
+    items = [format_bilingual(r) for r in rows]
+    load_attachments(conn, items)
+    attach_author_avatars(conn, items)
+    attach_likes(conn, items)
+    return items, has_more
+
 def format_file_size(num):
     if num is None:
         return ''
@@ -174,6 +258,53 @@ def format_file_size(num):
             return f"{num:.0f} {unit}" if unit == 'B' else f"{num:.1f} {unit}"
         num /= 1024
     return f"{num:.1f} GB"
+
+def normalize_tags(raw):
+    """把标签输入(逗号字符串或列表)清洗成去重、限长的列表(最多 8 个,每个 ≤30 字)。"""
+    if isinstance(raw, str):
+        parts = re.split(r'[,，]', raw)
+    elif isinstance(raw, list):
+        parts = raw
+    else:
+        parts = []
+    out = []
+    for p in parts:
+        t = str(p).strip()[:30]
+        if t and t not in out:
+            out.append(t)
+        if len(out) >= 8:
+            break
+    return out
+
+def contribution_streak(conn, user_id):
+    """当前连续贡献天数:从今天(或昨天)往前数,有词条产出的连续自然日数量。"""
+    rows = conn.execute(
+        "SELECT DISTINCT substr(created_at, 1, 10) d FROM items WHERE user_id = ?", (user_id,)
+    ).fetchall()
+    dset = {r['d'] for r in rows if r['d']}
+    if not dset:
+        return 0
+    today = datetime.now().date()
+    start = today
+    if today.isoformat() not in dset:
+        start = today - timedelta(days=1)
+        if start.isoformat() not in dset:
+            return 0  # 今天和昨天都没贡献,连续中断
+    streak = 0
+    cur = start
+    while cur.isoformat() in dset:
+        streak += 1
+        cur = cur - timedelta(days=1)
+    return streak
+
+def user_can_modify(conn, item_id):
+    """返回 (item_row, 是否有权修改)。管理员 TROYCE 或条目作者本人可改。"""
+    row = conn.execute('SELECT * FROM items WHERE id = ?', (item_id,)).fetchone()
+    if not row:
+        return None, False
+    is_admin = session.get('username') == 'TROYCE'
+    is_owner = row['user_id'] is not None and row['user_id'] == session.get('user_id')
+    return row, (is_admin or is_owner)
 
 def translate_text(item_name, definition):
     translated_item = ""
@@ -190,6 +321,25 @@ def translate_text(item_name, definition):
         translated_item = item_name
         translated_definition = definition
     return translated_item, translated_definition
+
+def _translate_and_store(item_id, item_name, definition):
+    """后台线程:翻译完成后写回该条目。译文暂缺时前端会回退显示原文。"""
+    t_item, t_def = translate_text(item_name, definition)
+    try:
+        conn = get_db_connection()
+        conn.execute(
+            'UPDATE items SET translated_item=?, translated_definition=? WHERE id=?',
+            (t_item, t_def, item_id)
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Async translate store error: {e}")
+
+def translate_async(item_id, item_name, definition):
+    threading.Thread(
+        target=_translate_and_store, args=(item_id, item_name, definition), daemon=True
+    ).start()
 
 def login_required(f):
     @wraps(f)
@@ -224,24 +374,64 @@ def index():
     today_items = [format_bilingual(row) for row in rows]
     load_attachments(conn, today_items)
     attach_author_avatars(conn, today_items)
+    attach_likes(conn, today_items)
     conn.close()
     return render_template('index.html', items=today_items, today_date=today_str)
 
+PER_PAGE = 12
+
 @app.route('/explore')
 def explore():
+    q = request.args.get('q', '').strip()
+    type_ = request.args.get('type', 'all')
+    tag = request.args.get('tag', '').strip()
+    date = request.args.get('date', '').strip()
     conn = get_db_connection()
-    rows = conn.execute("SELECT * FROM items ORDER BY created_at DESC").fetchall()
-    items = []
-    custom_types = set()
-    for row in rows:
-        item = format_bilingual(row)
-        items.append(item)
-        if item['item_type'] not in ['word', 'concept']:
-            custom_types.add(item['item_type'])
-    load_attachments(conn, items)
-    attach_author_avatars(conn, items)
+    items, has_more = query_items(conn, q=q, type_=type_, tag=tag, date=date, page=1, per_page=PER_PAGE)
+    ct_rows = conn.execute(
+        "SELECT DISTINCT item_type FROM items WHERE item_type NOT IN ('word','concept')"
+    ).fetchall()
+    custom_types = [r['item_type'] for r in ct_rows]
     conn.close()
-    return render_template('explore.html', items=items, custom_types=list(custom_types))
+    return render_template('explore.html', items=items, custom_types=custom_types,
+                           has_more=has_more, active_q=q, active_type=type_,
+                           active_tag=tag, active_date=date)
+
+@app.route('/api/items')
+def api_items():
+    q = request.args.get('q', '').strip()
+    type_ = request.args.get('type', 'all')
+    tag = request.args.get('tag', '').strip()
+    date = request.args.get('date', '').strip()
+    try:
+        page = max(int(request.args.get('page', 1)), 1)
+    except ValueError:
+        page = 1
+    conn = get_db_connection()
+    items, has_more = query_items(conn, q=q, type_=type_, tag=tag, date=date, page=page, per_page=PER_PAGE)
+    conn.close()
+    html = ''.join(render_template('_card.html', item=it) for it in items)
+    return jsonify({"html": html, "has_more": has_more, "page": page})
+
+@app.route('/flashcards')
+def flashcards():
+    type_ = request.args.get('type', 'all')
+    tag = request.args.get('tag', '').strip()
+    conn = get_db_connection()
+    items, _ = query_items(conn, type_=type_, tag=tag, page=1, per_page=100)
+    ct_rows = conn.execute(
+        "SELECT DISTINCT item_type FROM items WHERE item_type NOT IN ('word','concept')"
+    ).fetchall()
+    custom_types = [r['item_type'] for r in ct_rows]
+    conn.close()
+    # 只传卡片正反面需要的字段给前端
+    cards = [{
+        'name_en': it['name_en'], 'name_zh': it['name_zh'],
+        'def_en': it['def_en'], 'def_zh': it['def_zh'],
+        'type': it['item_type'], 'id': it['id']
+    } for it in items]
+    return render_template('flashcards.html', cards=cards, custom_types=custom_types,
+                           active_type=type_, active_tag=tag)
 
 @app.route('/login')
 def login_page():
@@ -263,11 +453,9 @@ def submit_page():
 @app.route('/edit-page/<int:item_id>')
 @login_required
 def edit_page(item_id):
-    if session.get('username') != 'TROYCE':
-        return redirect(url_for('index'))
     conn = get_db_connection()
-    row = conn.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
-    if not row:
+    row, allowed = user_can_modify(conn, item_id)
+    if not row or not allowed:
         conn.close()
         return redirect(url_for('index'))
     item = format_bilingual(row)
@@ -292,10 +480,13 @@ def user_profile(username):
     items = [format_bilingual(r) for r in rows]
     load_attachments(conn, items)
     attach_author_avatars(conn, items)
+    attach_likes(conn, items)
+    streak = contribution_streak(conn, user['id'])
     conn.close()
     profile = dict(user)
     profile['join_date'] = (user['created_at'] or '').split(' ')[0]
     profile['item_count'] = len(items)
+    profile['streak'] = streak
     profile['is_self'] = (session.get('user_id') == user['id'])
     return render_template('user.html', profile=profile, items=items)
 
@@ -303,9 +494,16 @@ def user_profile(username):
 @login_required
 def settings_page():
     conn = get_db_connection()
-    row = conn.execute('SELECT avatar FROM users WHERE id = ?', (session['user_id'],)).fetchone()
+    row = conn.execute(
+        'SELECT avatar, email, email_subscribed FROM users WHERE id = ?', (session['user_id'],)
+    ).fetchone()
     conn.close()
-    return render_template('settings.html', avatar=row['avatar'] if row else None)
+    return render_template(
+        'settings.html',
+        avatar=row['avatar'] if row else None,
+        has_email=bool(row and row['email']),
+        subscribed=bool(row and row['email_subscribed'])
+    )
 
 
 # ==== API 接口路由 ====
@@ -419,6 +617,14 @@ def submit():
     reference_urls = data.get('reference_urls', [])
     is_anonymous = data.get('is_anonymous', False) 
     
+    if not item_name or not definition:
+        return jsonify({"error": "Item name and definition are required"}), 400
+
+    # 简单频率限制:同一会话两次提交至少间隔 5 秒
+    now = time.time()
+    if now - session.get('last_submit_ts', 0) < 5:
+        return jsonify({"error": "You're submitting too fast. Please wait a moment."}), 429
+
     user_id = session['user_id']
     if is_anonymous:
         author = "Anonymous" if request.headers.get('Accept-Language', '').startswith('en') else "匿名用户"
@@ -426,14 +632,15 @@ def submit():
         author = session['username']
 
     urls_json = json.dumps(reference_urls)
-    translated_item, translated_definition = translate_text(item_name, definition)
+    tags_json = json.dumps(normalize_tags(data.get('tags')))
 
     try:
         conn = get_db_connection()
+        # 译文先留空,提交后由后台线程补写(避免同步调用翻译 API 阻塞请求)
         cursor = conn.execute('''
-            INSERT INTO items (item_type, item_name, translated_item, definition, translated_definition, example, reference_urls, author, user_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (item_type, item_name, translated_item, definition, translated_definition, example, urls_json, author, user_id))
+            INSERT INTO items (item_type, item_name, translated_item, definition, translated_definition, example, reference_urls, tags, author, user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (item_type, item_name, None, definition, None, example, urls_json, tags_json, author, user_id))
         item_id = cursor.lastrowid
         # 把本次上传的待挂载附件绑定到新条目(只能绑自己的、尚未挂载的)
         att_ids = [a for a in (data.get('attachment_ids') or []) if isinstance(a, int)]
@@ -445,6 +652,8 @@ def submit():
             )
         conn.commit()
         conn.close()
+        session['last_submit_ts'] = now
+        translate_async(item_id, item_name, definition)
         return jsonify({"message": "Success"}), 201
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -452,8 +661,6 @@ def submit():
 @app.route('/api/edit/<int:item_id>', methods=['PUT'])
 @login_required
 def api_edit(item_id):
-    if session.get('username') != 'TROYCE':
-        return jsonify({"error": "Admin access required"}), 403
     data = request.json
     item_type = data.get('type')
     item_name = data.get('item')
@@ -461,14 +668,19 @@ def api_edit(item_id):
     example = data.get('example', '')
     reference_urls = data.get('reference_urls', [])
     urls_json = json.dumps(reference_urls)
-    translated_item, translated_definition = translate_text(item_name, definition)
+    tags_json = json.dumps(normalize_tags(data.get('tags')))
     try:
         conn = get_db_connection()
+        _, allowed = user_can_modify(conn, item_id)
+        if not allowed:
+            conn.close()
+            return jsonify({"error": "Permission denied"}), 403
+        # 译文清空,交由后台线程按新内容重新翻译
         conn.execute('''
             UPDATE items
-            SET item_type=?, item_name=?, translated_item=?, definition=?, translated_definition=?, example=?, reference_urls=?
+            SET item_type=?, item_name=?, translated_item=?, definition=?, translated_definition=?, example=?, reference_urls=?, tags=?
             WHERE id=?
-        ''', (item_type, item_name, translated_item, definition, translated_definition, example, urls_json, item_id))
+        ''', (item_type, item_name, None, definition, None, example, urls_json, tags_json, item_id))
         # 编辑时新上传的附件同样挂载到该条目
         att_ids = [a for a in (data.get('attachment_ids') or []) if isinstance(a, int)]
         if att_ids:
@@ -479,6 +691,7 @@ def api_edit(item_id):
             )
         conn.commit()
         conn.close()
+        translate_async(item_id, item_name, definition)
         return jsonify({"message": "Updated successfully"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -486,10 +699,12 @@ def api_edit(item_id):
 @app.route('/api/delete/<int:item_id>', methods=['DELETE'])
 @login_required
 def delete_item(item_id):
-    if session.get('username') != 'TROYCE':
-        return jsonify({"error": "Admin access required"}), 403
     try:
         conn = get_db_connection()
+        _, allowed = user_can_modify(conn, item_id)
+        if not allowed:
+            conn.close()
+            return jsonify({"error": "Permission denied"}), 403
         # 一并清理该条目的附件(数据库记录 + 磁盘文件)
         rows = conn.execute('SELECT stored_name FROM attachments WHERE item_id = ?', (item_id,)).fetchall()
         for row in rows:
@@ -498,12 +713,35 @@ def delete_item(item_id):
             except OSError:
                 pass
         conn.execute('DELETE FROM attachments WHERE item_id = ?', (item_id,))
+        conn.execute('DELETE FROM likes WHERE item_id = ?', (item_id,))
         conn.execute('DELETE FROM items WHERE id = ?', (item_id,))
         conn.commit()
         conn.close()
         return jsonify({"message": "Deleted successfully"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route('/api/like/<int:item_id>', methods=['POST'])
+@login_required
+def toggle_like(item_id):
+    conn = get_db_connection()
+    if not conn.execute('SELECT 1 FROM items WHERE id = ?', (item_id,)).fetchone():
+        conn.close()
+        return jsonify({"error": "Item not found"}), 404
+    uid = session['user_id']
+    existing = conn.execute(
+        'SELECT id FROM likes WHERE user_id = ? AND item_id = ?', (uid, item_id)
+    ).fetchone()
+    if existing:
+        conn.execute('DELETE FROM likes WHERE id = ?', (existing['id'],))
+        liked = False
+    else:
+        conn.execute('INSERT INTO likes (user_id, item_id) VALUES (?, ?)', (uid, item_id))
+        liked = True
+    conn.commit()
+    count = conn.execute('SELECT COUNT(*) c FROM likes WHERE item_id = ?', (item_id,)).fetchone()['c']
+    conn.close()
+    return jsonify({"liked": liked, "count": count}), 200
 
 # ==== 附件:上传 / 文件服务 / 在线查看 ====
 
@@ -646,5 +884,89 @@ def api_remove_avatar():
     session['avatar'] = None
     return jsonify({"message": "Avatar removed"}), 200
 
+# ==== 每日邮件订阅 ====
+
+def send_email(to_addr, subject, body):
+    """通过网易 SMTP 发送一封纯文本邮件。返回 True/False。"""
+    if not NETEASE_EMAIL or not NETEASE_PASSWORD:
+        return False
+    try:
+        msg = MIMEText(body, 'plain', 'utf-8')
+        msg['Subject'] = subject
+        msg['From'] = f"XOTD Community <{NETEASE_EMAIL}>"
+        msg['To'] = to_addr
+        server = smtplib.SMTP_SSL('smtp.163.com', 465)
+        server.login(NETEASE_EMAIL, NETEASE_PASSWORD)
+        server.sendmail(NETEASE_EMAIL, [to_addr], msg.as_string())
+        server.quit()
+        return True
+    except Exception as e:
+        print(f"send_email error to {to_addr}: {e}")
+        return False
+
+@app.route('/api/subscription', methods=['POST'])
+@login_required
+def api_subscription():
+    subscribe = bool((request.json or {}).get('subscribe'))
+    conn = get_db_connection()
+    row = conn.execute('SELECT email FROM users WHERE id = ?', (session['user_id'],)).fetchone()
+    if subscribe and not (row and row['email']):
+        conn.close()
+        return jsonify({"error": "No email on file for this account"}), 400
+    conn.execute('UPDATE users SET email_subscribed = ? WHERE id = ?',
+                 (1 if subscribe else 0, session['user_id']))
+    conn.commit()
+    conn.close()
+    return jsonify({"subscribed": subscribe}), 200
+
+def build_digest_body(items):
+    lines = ["今天的 XOTD 知识精选 / Today's XOTD highlights", ""]
+    for it in items:
+        name = it['item_name']
+        translated = it.get('translated_item')
+        title = f"{name}" + (f"  ({translated})" if translated and translated != name else "")
+        lines.append(f"• {title}  [{it['item_type']}]")
+        definition = (it.get('definition') or '').strip().replace('\n', ' ')
+        if len(definition) > 200:
+            definition = definition[:200] + '…'
+        lines.append(f"  {definition}")
+        lines.append("")
+    lines.append(f"查看全部 / See more: {SITE_URL}/")
+    lines.append("")
+    lines.append(f"不想再收到?到 {SITE_URL}/settings 取消订阅。")
+    return "\n".join(lines)
+
+def send_daily_digest():
+    """给所有已订阅且有邮箱的用户发送今天的词条精选。返回发送成功数。"""
+    conn = get_db_connection()
+    today_str = datetime.now().strftime('%Y-%m-%d')
+    rows = conn.execute(
+        "SELECT * FROM items WHERE created_at LIKE ? ORDER BY created_at DESC", (f"{today_str}%",)
+    ).fetchall()
+    items = [dict(r) for r in rows]
+    subscribers = conn.execute(
+        "SELECT email FROM users WHERE email_subscribed = 1 AND email IS NOT NULL AND email != ''"
+    ).fetchall()
+    conn.close()
+    if not items or not subscribers:
+        return 0
+    body = build_digest_body(items)
+    subject = f"XOTD · {today_str} · {len(items)} 条新知识"
+    sent = 0
+    for sub in subscribers:
+        if send_email(sub['email'], subject, body):
+            sent += 1
+    return sent
+
+@app.route('/cron/daily-digest')
+def cron_daily_digest():
+    # 受 CRON_SECRET 保护:仅供定时任务调用
+    if not CRON_SECRET or request.args.get('key') != CRON_SECRET:
+        abort(403)
+    sent = send_daily_digest()
+    return jsonify({"sent": sent}), 200
+
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    # 本地默认开启 debug;设 FLASK_DEBUG=0 可关闭。生产用 gunicorn 不走这里。
+    debug = os.environ.get('FLASK_DEBUG', '1') != '0'
+    app.run(debug=debug, port=5000)

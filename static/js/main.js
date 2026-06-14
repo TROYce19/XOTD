@@ -57,6 +57,23 @@ const translations = {
         profileView: "View my profile",
         userNotFound: "User not found",
         userNotFoundSub: "This user doesn't exist or has been removed.",
+        navFlashcards: "Flashcards",
+        navProfileShort: "Profile",
+        formTags: "Tags (Optional)",
+        tagsHint: "Comma-separated, up to 8",
+        placeholderTags: "e.g., grammar, history, physics",
+        profileStreak: "day streak",
+        subSectionTitle: "Daily email",
+        subToggleLabel: "Email me today's highlights each day",
+        subNoEmail: "Add an email to your account to enable daily emails.",
+        subOn: "Subscribed — you'll get a daily email.",
+        subOff: "Unsubscribed.",
+        subFailed: "Could not update subscription",
+        flashTitle: "Flashcards",
+        flashSub: "Tap the card to flip. Use the arrows or your keyboard to navigate.",
+        flashFlip: "Flip",
+        flashFlipHint: "click to reveal",
+        flashEmpty: "No cards for this filter yet.",
         wordTitle: "Word of the Day",
         conceptTitle: "Concept of the Day",
         exploreTitle: "Explore Past XOTDs",
@@ -148,6 +165,23 @@ const translations = {
         profileView: "查看我的主页",
         userNotFound: "用户不存在",
         userNotFoundSub: "该用户不存在或已被移除。",
+        navFlashcards: "记忆卡",
+        navProfileShort: "主页",
+        formTags: "标签 (选填)",
+        tagsHint: "用逗号分隔,最多 8 个",
+        placeholderTags: "例如:语法、历史、物理",
+        profileStreak: "天连续贡献",
+        subSectionTitle: "每日邮件",
+        subToggleLabel: "每天把今日精选发到我的邮箱",
+        subNoEmail: "请先为账号绑定邮箱以开启每日邮件。",
+        subOn: "已订阅 —— 你将收到每日邮件。",
+        subOff: "已取消订阅。",
+        subFailed: "更新订阅失败",
+        flashTitle: "记忆卡",
+        flashSub: "点击卡片翻面。用箭头或键盘切换。",
+        flashFlip: "翻面",
+        flashFlipHint: "点击查看释义",
+        flashEmpty: "该筛选下还没有卡片。",
         wordTitle: "今日单词",
         conceptTitle: "今日概念",
         exploreTitle: "探索往期 XOTD",
@@ -184,6 +218,8 @@ const translations = {
 };
 
 let currentLang = localStorage.getItem('xotd_lang') || 'en';
+// 是否已登录:导航栏的用户区仅在登录时由服务端渲染
+const IS_LOGGED_IN = !!document.querySelector('.nav-user');
 
 function updateLanguage(lang) {
     currentLang = lang;
@@ -425,11 +461,13 @@ if (submitForm) {
         const endpoint = editId ? `/api/edit/${editId}` : '/api/submit';
         const method = editId ? 'PUT' : 'POST';
 
+        const tagsInput = document.getElementById('item-tags');
         const payload = {
             type: finalType,
             item: document.getElementById('item-name').value,
             definition: document.getElementById('item-definition').value,
             example: document.getElementById('item-example').value,
+            tags: tagsInput ? tagsInput.value : '',
             reference_urls: reference_urls,
             is_anonymous: isAnonymous,
             attachment_ids: (typeof getPendingAttachmentIds === 'function') ? getPendingAttachmentIds() : []
@@ -460,113 +498,241 @@ if (submitForm) {
     });
 }
 
-// ==== Explore 页检索引擎 ====
-const toggleOthersBtn = document.getElementById('toggle-others-btn');
-const customTypesPanel = document.getElementById('custom-types-panel');
-const searchInput = document.getElementById('search-input');
-const datePicker = document.getElementById('date-picker');
-const clearDateBtn = document.getElementById('clear-date-btn');
-const filterBtns = document.querySelectorAll('.filter-btn');
-const itemCards = document.querySelectorAll('.item-card');
-const noResultsMsg = document.getElementById('no-results-msg');
-
-let currentActiveFilter = 'all';
-
-if (toggleOthersBtn && customTypesPanel) {
-    toggleOthersBtn.addEventListener('click', () => {
-        customTypesPanel.classList.toggle('hidden');
-        customTypesPanel.classList.toggle('flex');
+// ==== 让动态插入的卡片同步语言显示 + 直接可见(跳过滚动 reveal) ====
+function activateNewCards(container) {
+    container.querySelectorAll('.bilingual-text').forEach(el => {
+        el.classList.toggle('hidden', el.getAttribute('data-lang') !== currentLang);
     });
+    container.querySelectorAll('[data-reveal]').forEach(el => el.classList.add('is-visible'));
 }
 
-function applyAllFilters() {
-    if(!itemCards) return;
-    
-    const keyword = searchInput ? searchInput.value.trim().toLowerCase() : '';
-    const selectedDate = datePicker ? datePicker.value : '';
-    let visibleCount = 0;
+// ==== Explore 页:后端搜索 + 筛选 + 无限滚动 ====
+(function initExplore() {
+    const grid = document.getElementById('explore-grid');
+    if (!grid) return;
 
-    itemCards.forEach(card => {
-        const cardType = card.getAttribute('data-type');
-        const cardDate = card.getAttribute('data-date');
-        const cardText = card.innerText.toLowerCase(); 
+    const toggleOthersBtn = document.getElementById('toggle-others-btn');
+    const customTypesPanel = document.getElementById('custom-types-panel');
+    const searchInput = document.getElementById('search-input');
+    const datePicker = document.getElementById('date-picker');
+    const clearDateBtn = document.getElementById('clear-date-btn');
+    const filterBtns = document.querySelectorAll('.filter-btn');
+    const noResultsMsg = document.getElementById('no-results-msg');
+    const loader = document.getElementById('grid-loader');
+    const sentinel = document.getElementById('scroll-sentinel');
 
-        let matchCategory = false;
-        if (currentActiveFilter === 'all') {
-            matchCategory = true;
-        } else if (currentActiveFilter === 'only-others') {
-            matchCategory = (cardType !== 'word' && cardType !== 'concept');
-        } else {
-            matchCategory = (cardType === currentActiveFilter);
-        }
+    // 初始状态来自服务端渲染的首屏
+    const state = {
+        q: grid.dataset.q || '',
+        type: grid.dataset.type || 'all',
+        tag: grid.dataset.tag || '',
+        date: grid.dataset.date || '',
+        page: 1,
+        hasMore: grid.dataset.hasMore === 'true',
+        loading: false
+    };
 
-        let matchKeyword = (keyword === '') || cardText.includes(keyword);
-        let matchDate = (selectedDate === '') || (cardDate === selectedDate);
+    function buildQuery(page) {
+        const p = new URLSearchParams();
+        if (state.q) p.set('q', state.q);
+        if (state.type && state.type !== 'all') p.set('type', state.type);
+        if (state.tag) p.set('tag', state.tag);
+        if (state.date) p.set('date', state.date);
+        p.set('page', page);
+        return p.toString();
+    }
 
-        if (matchCategory && matchKeyword && matchDate) {
-            const wasHidden = card.style.display === 'none';
-            card.style.display = 'flex';
-            // 重新进入视图的卡片做一次轻量的淡入位移
-            if (wasHidden) {
-                card.classList.remove('card-pop');
-                void card.offsetWidth;
-                card.classList.add('card-pop');
+    async function loadPage(page, replace) {
+        if (state.loading) return;
+        state.loading = true;
+        if (loader) loader.classList.remove('hidden');
+        try {
+            const res = await fetch('/api/items?' + buildQuery(page));
+            const data = await res.json();
+            if (replace) grid.innerHTML = '';
+            const tmp = document.createElement('div');
+            tmp.innerHTML = data.html;
+            while (tmp.firstElementChild) grid.appendChild(tmp.firstElementChild);
+            activateNewCards(grid);
+            state.page = data.page;
+            state.hasMore = data.has_more;
+            if (noResultsMsg) {
+                noResultsMsg.classList.toggle('hidden', grid.children.length > 0);
             }
-            visibleCount++;
-        } else {
-            card.style.display = 'none';
-        }
-    });
-
-    if (noResultsMsg) {
-        if (visibleCount === 0 && itemCards.length > 0) {
-            noResultsMsg.classList.remove('hidden');
-        } else {
-            noResultsMsg.classList.add('hidden');
+        } catch (e) {
+            console.error('Explore load error:', e);
+        } finally {
+            state.loading = false;
+            if (loader) loader.classList.add('hidden');
         }
     }
-}
 
-if (searchInput) {
-    searchInput.addEventListener('input', applyAllFilters);
-    // 支持 /explore?q=keyword 深链(如从作者名跳转预填搜索)
-    const qParam = new URLSearchParams(window.location.search).get('q');
-    if (qParam) {
-        searchInput.value = qParam;
-        applyAllFilters();
+    // 任一筛选条件变化 → 重置到第 1 页重新拉取
+    function reload() { state.page = 1; state.hasMore = false; loadPage(1, true); }
+
+    if (toggleOthersBtn && customTypesPanel) {
+        toggleOthersBtn.addEventListener('click', () => {
+            customTypesPanel.classList.toggle('hidden');
+            customTypesPanel.classList.toggle('flex');
+        });
     }
-}
 
-if (datePicker) {
-    datePicker.addEventListener('change', () => {
-        if (datePicker.value !== '') {
-            clearDateBtn.classList.remove('hidden');
-        } else {
+    if (searchInput) {
+        let t;
+        searchInput.addEventListener('input', () => {
+            clearTimeout(t);
+            t = setTimeout(() => { state.q = searchInput.value.trim(); reload(); }, 300);
+        });
+    }
+
+    if (datePicker) {
+        datePicker.addEventListener('change', () => {
+            state.date = datePicker.value;
+            if (clearDateBtn) clearDateBtn.classList.toggle('hidden', !datePicker.value);
+            reload();
+        });
+    }
+    if (clearDateBtn) {
+        clearDateBtn.addEventListener('click', () => {
+            datePicker.value = '';
+            state.date = '';
             clearDateBtn.classList.add('hidden');
-        }
-        applyAllFilters();
-    });
-}
+            reload();
+        });
+    }
 
-if (clearDateBtn) {
-    clearDateBtn.addEventListener('click', () => {
-        datePicker.value = '';
-        clearDateBtn.classList.add('hidden');
-        applyAllFilters();
-    });
-}
-
-if (filterBtns.length > 0) {
     filterBtns.forEach(btn => {
         btn.addEventListener('click', () => {
             filterBtns.forEach(b => b.classList.remove('is-active'));
             btn.classList.add('is-active');
-
-            currentActiveFilter = btn.getAttribute('data-filter');
-            applyAllFilters();
+            state.type = btn.getAttribute('data-filter');
+            reload();
         });
     });
-}
+
+    // 无限滚动:哨兵进入视口则加载下一页
+    if (sentinel && 'IntersectionObserver' in window) {
+        const io = new IntersectionObserver((entries) => {
+            if (entries[0].isIntersecting && state.hasMore && !state.loading) {
+                loadPage(state.page + 1, false);
+            }
+        }, { rootMargin: '300px' });
+        io.observe(sentinel);
+    }
+})();
+
+// ==== 点赞(事件委托,所有页面通用) ====
+document.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.like-btn');
+    if (!btn) return;
+    if (!IS_LOGGED_IN) { window.location.href = '/login'; return; }
+    const id = btn.getAttribute('data-id');
+    btn.disabled = true;
+    try {
+        const res = await fetch(`/api/like/${id}`, { method: 'POST' });
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        btn.classList.toggle('is-liked', data.liked);
+        btn.setAttribute('aria-pressed', data.liked ? 'true' : 'false');
+        const countEl = btn.querySelector('.like-count');
+        if (countEl) countEl.textContent = data.count;
+        if (data.liked) {
+            btn.classList.remove('like-pop');
+            void btn.offsetWidth;
+            btn.classList.add('like-pop');
+        }
+    } catch (err) {
+        console.error('Like error:', err);
+    } finally {
+        btn.disabled = false;
+    }
+});
+
+// ==== 设置页:每日邮件订阅开关 ====
+(function initSubscription() {
+    const toggle = document.getElementById('sub-toggle');
+    const status = document.getElementById('sub-status');
+    if (!toggle) return;
+    toggle.addEventListener('change', async () => {
+        const want = toggle.checked;
+        toggle.disabled = true;
+        try {
+            const res = await fetch('/api/subscription', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ subscribe: want })
+            });
+            const data = await safeParseJSON(res);
+            if (!res.ok) throw new Error(data.error || 'Failed');
+            status.className = 'status-msg is-success';
+            status.textContent = want ? translations[currentLang].subOn : translations[currentLang].subOff;
+        } catch (err) {
+            toggle.checked = !want;
+            status.className = 'status-msg is-error';
+            status.textContent = (translations[currentLang].subFailed || 'Failed') + (err.message ? `: ${err.message}` : '');
+        } finally {
+            toggle.disabled = false;
+        }
+    });
+})();
+
+// ==== Flashcards 翻转学习 ====
+(function initFlashcards() {
+    const stage = document.getElementById('flashcard');
+    const dataEl = document.getElementById('fc-data');
+    if (!stage || !dataEl) return;
+
+    let deck;
+    try { deck = JSON.parse(dataEl.textContent); } catch (e) { return; }
+    if (!deck.length) return;
+
+    const termEl = document.getElementById('fc-term');
+    const defEl = document.getElementById('fc-def');
+    const typeEl = document.getElementById('fc-type');
+    const idxEl = document.getElementById('fc-index');
+    let i = 0;
+
+    function render() {
+        const c = deck[i];
+        termEl.textContent = currentLang === 'zh' ? c.name_zh : c.name_en;
+        defEl.textContent = currentLang === 'zh' ? c.def_zh : c.def_en;
+        typeEl.textContent = c.type;
+        idxEl.textContent = (i + 1);
+        stage.classList.remove('is-flipped');
+    }
+    function flip() { stage.classList.toggle('is-flipped'); }
+    function go(delta) {
+        i = (i + delta + deck.length) % deck.length;
+        render();
+    }
+    function shuffle() {
+        for (let k = deck.length - 1; k > 0; k--) {
+            const j = Math.floor(Math.random() * (k + 1));
+            [deck[k], deck[j]] = [deck[j], deck[k]];
+        }
+        i = 0; render();
+    }
+
+    stage.addEventListener('click', flip);
+    document.getElementById('fc-flip').addEventListener('click', flip);
+    document.getElementById('fc-prev').addEventListener('click', () => go(-1));
+    document.getElementById('fc-next').addEventListener('click', () => go(1));
+    document.getElementById('fc-shuffle').addEventListener('click', shuffle);
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowLeft') go(-1);
+        else if (e.key === 'ArrowRight') go(1);
+        else if (e.key === ' ' || e.key === 'Enter') {
+            if (document.activeElement === stage || document.activeElement === document.body) {
+                e.preventDefault(); flip();
+            }
+        }
+    });
+
+    // 语言切换时刷新当前卡面文字
+    document.getElementById('lang-switch')?.addEventListener('change', () => setTimeout(render, 0));
+    render();
+})();
 
 /* ============================================================
    以下为纯视觉/动效模块,不涉及任何数据逻辑

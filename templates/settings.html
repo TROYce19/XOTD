@@ -31,6 +31,22 @@
 
     <div id="avatar-status" class="status-msg hidden"></div>
 
+    <div class="settings-section">
+        <h3 class="settings-section-title" data-i18n="subSectionTitle">Daily email</h3>
+        {% if has_email %}
+        <label class="toggle-row" for="sub-toggle">
+            <span class="toggle-text" data-i18n="subToggleLabel">Email me today's highlights each day</span>
+            <span class="toggle">
+                <input type="checkbox" id="sub-toggle" {% if subscribed %}checked{% endif %}>
+                <span class="toggle-track"></span>
+            </span>
+        </label>
+        <div id="sub-status" class="status-msg hidden"></div>
+        {% else %}
+        <p class="avatar-hint" data-i18n="subNoEmail">Add an email to your account to enable daily emails.</p>
+        {% endif %}
+    </div>
+
     <p class="panel-foot">
         <a href="/user/{{ session.get('username') }}" class="text-link" data-i18n="profileView">View my profile</a>
     </p>

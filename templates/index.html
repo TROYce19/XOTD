@@ -14,91 +14,16 @@
         <span><span class="stat-num" data-countup>{{ items|length }}</span> <span data-i18n="todayCount">shared today</span></span>
         {% endif %}
     </div>
+
+    <div class="hero-actions" data-reveal>
+        <a href="/flashcards" class="btn btn-secondary" data-i18n="navFlashcards">Flashcards</a>
+        <a href="/explore" class="btn btn-secondary" data-i18n="navExplore">Explore</a>
+    </div>
 </header>
 
 <div class="card-grid">
     {% for item in items %}
-    <article class="card item-card {% if item.item_type == 'word' %}type-word{% elif item.item_type == 'concept' %}type-concept{% else %}type-other{% endif %}" data-reveal>
-
-        {% if session.get('username') == 'TROYCE' %}
-        <div class="admin-actions">
-            <a href="/edit-page/{{ item.id }}" class="icon-btn" title="Edit">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path></svg>
-            </a>
-            <button class="delete-btn icon-btn icon-btn-danger" data-id="{{ item.id }}" title="Delete">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-            </button>
-        </div>
-        {% endif %}
-
-        {% if item.images %}
-        <a href="/view/{{ item.images[0].id }}" class="card-cover">
-            <img src="/files/{{ item.images[0].stored_name }}" alt="{{ item.images[0].original_name }}" loading="lazy">
-            {% if item.images|length > 1 %}<span class="cover-count">+{{ item.images|length - 1 }}</span>{% endif %}
-        </a>
-        {% endif %}
-
-        <div class="card-head">
-            <span class="type-badge"><span class="type-dot"></span>{{ item.item_type }}</span>
-            <span class="card-date" data-i18n="todayLabel">Today</span>
-        </div>
-
-        <h3 class="card-title">
-            <span class="bilingual-text" data-lang="en">{{ item.name_en }}</span>
-            <span class="bilingual-text hidden" data-lang="zh">{{ item.name_zh }}</span>
-        </h3>
-        <p class="card-def">
-            <span class="bilingual-text" data-lang="en">{{ item.def_en }}</span>
-            <span class="bilingual-text hidden" data-lang="zh">{{ item.def_zh }}</span>
-        </p>
-
-        {% if item.example %}
-        <blockquote class="card-example">“{{ item.example }}”</blockquote>
-        {% endif %}
-
-        {% if item.urls %}
-        <div class="ref-row">
-            {% for url in item.urls %}
-            <a href="{{ url }}" target="_blank" rel="noopener" class="ref-chip">
-                <span data-i18n="readMore">Ref</span>
-                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"></path></svg>
-            </a>
-            {% endfor %}
-        </div>
-        {% endif %}
-
-        {% if item.docs or item.images|length > 1 %}
-        <div class="ref-row">
-            {% for doc in item.docs %}
-            <a href="/view/{{ doc.id }}" class="ref-chip file-chip">
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path></svg>
-                <span class="file-chip-name">{{ doc.original_name }}</span>
-            </a>
-            {% endfor %}
-            {% for img in item.images[1:] %}
-            <a href="/view/{{ img.id }}" class="thumb-mini"><img src="/files/{{ img.stored_name }}" alt="" loading="lazy"></a>
-            {% endfor %}
-        </div>
-        {% endif %}
-
-        <div class="card-footer">
-            {% if item.author_link %}
-            <a href="/user/{{ item.author_link }}" class="author">
-                {% if item.author_avatar %}
-                <img class="author-avatar" src="/files/{{ item.author_avatar }}" alt="">
-                {% else %}
-                <span class="author-avatar author-avatar-fallback">{{ item.author[:1]|upper }}</span>
-                {% endif %}
-                <span class="author-name">{{ item.author }}</span>
-            </a>
-            {% else %}
-            <span class="author author-static">
-                <span class="author-avatar author-avatar-fallback">{{ item.author[:1]|upper }}</span>
-                <span class="author-name">{{ item.author }}</span>
-            </span>
-            {% endif %}
-        </div>
-    </article>
+    {% include '_card.html' %}
     {% else %}
     <div class="empty-state" data-reveal>
         <p data-i18n="noDataToday">No one has shared anything today yet.</p>

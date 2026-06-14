@@ -1,0 +1,58 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="page-head">
+    <h1 data-reveal data-i18n="flashTitle">Flashcards</h1>
+    <p data-reveal data-i18n="flashSub">Tap the card to flip. Use the arrows or your keyboard to navigate.</p>
+</div>
+
+<div class="filter-row" data-reveal>
+    <a href="/flashcards" class="pill {% if active_type == 'all' %}is-active{% endif %}" data-i18n="filterAll">All</a>
+    <a href="/flashcards?type=word" class="pill {% if active_type == 'word' %}is-active{% endif %}" data-i18n="filterWords">Words</a>
+    <a href="/flashcards?type=concept" class="pill {% if active_type == 'concept' %}is-active{% endif %}" data-i18n="filterConcepts">Concepts</a>
+    {% for ct in custom_types %}
+    <a href="/flashcards?type={{ ct|urlencode }}" class="pill {% if active_type == ct %}is-active{% endif %}">{{ ct }}</a>
+    {% endfor %}
+</div>
+
+{% if cards %}
+<div class="flashcard-stage" data-reveal>
+    <div class="flashcard-progress">
+        <span id="fc-index">1</span> <span class="fc-sep">/</span> <span id="fc-total">{{ cards|length }}</span>
+    </div>
+
+    <div id="flashcard" class="flashcard" tabindex="0" role="button" aria-label="Flashcard, click to flip">
+        <div class="flashcard-inner">
+            <div class="flashcard-face flashcard-front">
+                <span class="fc-type" id="fc-type"></span>
+                <span class="fc-term" id="fc-term"></span>
+                <span class="fc-hint" data-i18n="flashFlipHint">click to reveal</span>
+            </div>
+            <div class="flashcard-face flashcard-back">
+                <span class="fc-def" id="fc-def"></span>
+            </div>
+        </div>
+    </div>
+
+    <div class="flashcard-controls">
+        <button id="fc-prev" class="icon-btn icon-btn-lg" aria-label="Previous">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"></path></svg>
+        </button>
+        <button id="fc-flip" class="btn btn-primary" data-i18n="flashFlip">Flip</button>
+        <button id="fc-next" class="icon-btn icon-btn-lg" aria-label="Next">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"></path></svg>
+        </button>
+        <button id="fc-shuffle" class="icon-btn icon-btn-lg" aria-label="Shuffle" title="Shuffle">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5"></path></svg>
+        </button>
+    </div>
+</div>
+
+<script id="fc-data" type="application/json">{{ cards|tojson }}</script>
+{% else %}
+<div class="empty-state" data-reveal>
+    <p data-i18n="flashEmpty">No cards for this filter yet.</p>
+    <a href="/submit-page" class="btn btn-primary btn-lg" data-i18n="navSubmit">Submit</a>
+</div>
+{% endif %}
+{% endblock %}
