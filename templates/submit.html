@@ -42,6 +42,14 @@
 
         <div>
             <label class="field-label">
+                <span data-i18n="formTags">Tags (Optional)</span>
+                <span class="field-hint" data-i18n="tagsHint">Comma-separated, up to 8</span>
+            </label>
+            <input type="text" id="item-tags" value="{{ item.tag_list|join(', ') if item and item.tag_list else '' }}" class="field-input" data-i18n-placeholder="placeholderTags">
+        </div>
+
+        <div>
+            <label class="field-label">
                 <span data-i18n="attachLabel">Attachments (Optional)</span>
                 <span class="field-hint" data-i18n="attachHint">Images · .md · .txt · .pdf — max 10 MB each</span>
             </label>
