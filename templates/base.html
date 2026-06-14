@@ -40,10 +40,14 @@
                 {% if session.get('user_id') %}
                     <a href="/submit-page" class="btn btn-primary nav-submit" data-i18n="navSubmit">Submit</a>
                     <div class="nav-user">
-                        <span class="user-chip">
+                        <a href="/settings" class="user-chip" title="Settings" data-i18n-title="settingsTitle">
+                            {% if current_avatar %}
+                            <img class="user-avatar user-avatar-img" src="/files/{{ current_avatar }}" alt="">
+                            {% else %}
                             <span class="user-avatar">{{ session.get('username')[:1]|upper }}</span>
+                            {% endif %}
                             {{ session.get('username') }}
-                        </span>
+                        </a>
                         <a href="/logout" class="nav-link nav-link-muted" data-i18n="navLogout">Logout</a>
                     </div>
                 {% else %}
@@ -74,6 +78,8 @@
             <a href="/explore" class="nav-menu-link" data-i18n="navExplore">Explore</a>
             {% if session.get('user_id') %}
                 <a href="/submit-page" class="nav-menu-link" data-i18n="navSubmit">Submit</a>
+                <a href="/user/{{ session.get('username') }}" class="nav-menu-link" data-i18n="navProfile">My Profile</a>
+                <a href="/settings" class="nav-menu-link" data-i18n="navSettings">Settings</a>
                 <a href="/logout" class="nav-menu-link" data-i18n="navLogout">Logout</a>
             {% else %}
                 <a href="/login" class="nav-menu-link" data-i18n="navLogin">Login</a>

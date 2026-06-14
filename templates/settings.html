@@ -1,0 +1,38 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="panel panel-narrow" data-reveal>
+    <div class="panel-head">
+        <h2 class="panel-title" data-i18n="settingsTitle">Settings</h2>
+        <p class="panel-sub" data-i18n="settingsSub">Manage your profile avatar.</p>
+    </div>
+
+    <div class="avatar-setter">
+        <div class="avatar-preview-wrap">
+            <img id="avatar-preview"
+                 class="avatar-preview {% if not avatar %}hidden{% endif %}"
+                 src="{% if avatar %}/files/{{ avatar }}{% endif %}" alt="Avatar">
+            <span id="avatar-fallback"
+                  class="avatar-preview avatar-preview-fallback {% if avatar %}hidden{% endif %}">
+                {{ session.get('username')[:1]|upper }}
+            </span>
+        </div>
+
+        <div class="avatar-actions">
+            <input type="file" id="avatar-input" class="hidden" accept=".png,.jpg,.jpeg,.gif,.webp">
+            <button type="button" id="avatar-upload-btn" class="btn btn-primary">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"></path></svg>
+                <span data-i18n="avatarUpload">Upload image</span>
+            </button>
+            <button type="button" id="avatar-remove-btn" class="btn btn-secondary {% if not avatar %}hidden{% endif %}" data-i18n="avatarRemove">Remove</button>
+        </div>
+        <p class="avatar-hint" data-i18n="avatarHint">PNG · JPG · GIF · WEBP, up to 10 MB.</p>
+    </div>
+
+    <div id="avatar-status" class="status-msg hidden"></div>
+
+    <p class="panel-foot">
+        <a href="/user/{{ session.get('username') }}" class="text-link" data-i18n="profileView">View my profile</a>
+    </p>
+</div>
+{% endblock %}
