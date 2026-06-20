@@ -72,7 +72,7 @@ python app.py
 | `SECRET_KEY` | Flask session 密钥,**生产环境务必设置** | 生产必需 |
 | `NETEASE_EMAIL` / `NETEASE_PASSWORD` | 网易 163 邮箱与授权码,用于发送验证码与每日邮件 | 邮件功能需要 |
 | `CRON_SECRET` | 保护 `/cron/daily-digest` 定时接口的密钥 | 每日邮件需要 |
-| `SITE_URL` | 站点对外地址(用于邮件内的链接) | 可选 |
+| `SITE_URL` | 站点对外地址(用于邮件内的链接),如 `https://xotd-hrcdgnakg5evdrfu.eastasia-01.azurewebsites.net` | 可选 |
 | `FLASK_DEBUG` | 本地调试开关,设 `0` 关闭 | 可选 |
 
 > 上传的附件本地存于 `uploads/`,Azure 上存于持久化目录 `/home/uploads`。
